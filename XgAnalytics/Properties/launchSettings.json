@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "XgAnalytics": {
+      "commandName": "Project",
+      "commandLineArgs": "\"D:\\Users\\Hal\\Documents\\eXtremeGammon\\OtherMatches\""
+    }
+  }
+}
