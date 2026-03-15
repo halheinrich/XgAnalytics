@@ -1,5 +1,4 @@
 <Solution>
   <Project Path="../ConvertXgToJson_Lib/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj" />
-  <Project Path="../XgFilter_Lib/XgFilter_Lib/XgFilter_Lib.csproj" />
   <Project Path="XgAnalytics/XgAnalytics.csproj" />
 </Solution>

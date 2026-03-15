@@ -39,11 +39,10 @@ internal class Program
 
         foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
         {
-            XgFile file;
-            try { file = XgFileReader.ReadFile(path); }
+            XgMatchInfo info;
+            try { info = XgFileReader.ReadMatchInfo(path); }
             catch { continue; }
 
-            var info = XgDecisionIterator.ExtractMatchInfo(file);
             string matchId = Path.GetFileNameWithoutExtension(path);
 
             RegisterPlayer(info.Player1, matchId, playerMatches);
@@ -91,7 +90,6 @@ internal class Program
 
         Console.WriteLine($"\nCSV written to: {csvPath}");
     }
-
     // -------------------------------------------------------------------------
     //  Helpers
     // -------------------------------------------------------------------------
