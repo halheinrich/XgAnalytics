@@ -60,14 +60,9 @@ Key files:
 - Player match count — list of players and how many matches they've played
 
 ## Shared rules
-Fetch and apply before starting work:
-`https://raw.githubusercontent.com/halheinrich/backgammon/main/AGENTS.md`
-(GitHub raw URLs are blocked in Claude's container — paste this URL into chat and ask Claude to fetch it.)
 
-## Fetching source files
-GitHub (raw.githubusercontent.com) is blocked in Claude's container.
-**Workaround:** Ask Claude for the URLs needed, paste them back into the chat.
-Claude can then use web_fetch via the user-provided URLs.
+See `AGENTS.md` in the umbrella repo — applies to all sub-projects.
+`https://raw.githubusercontent.com/halheinrich/backgammon/main/AGENTS.md`
 
 ## Session handoff
 After any commit:
