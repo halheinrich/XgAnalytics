@@ -1,71 +1,75 @@
-# XgAnalytics — Project Instructions
+# XgAnalytics — Subproject Instructions
 
-Part of the Backgammon tools ecosystem: https://github.com/halheinrich/backgammon
-**After committing here, return to the Backgammon Umbrella project to update hashes and instructions doc.**
-
-## Purpose
-Ad-hoc analysis tools and queries against .xg/.xgp files. One-off scripts and exploratory code that doesn't belong in the core libraries or the Blazor app.
+> See [`../CLAUDE.md`](../CLAUDE.md) for session conventions.
+> See [`../INSTRUCTIONS.md`](../INSTRUCTIONS.md) for cross-cutting status and the dependency graph.
+> See [`../VISION.md`](../VISION.md) for mission and principles.
 
 ## Stack
-C# / .NET 10 / Visual Studio 2026 / Windows
 
-## Local root
-`D:\Users\Hal\Documents\Visual Studio 2026\Projects\backgammon\`
+C# / .NET 10 class library + xUnit test project. Visual Studio 2026, Windows.
 
-## Shared infrastructure
+## Solution
 
-### TestData
-- Location: `D:\Users\Hal\Documents\Visual Studio 2026\Projects\backgammon\TestData`
-- `BothWays/` subfolder: `ThisWay.xg` and `ThatWay.xg` — same match, perspectives reversed
-- Shared across all projects — do NOT put TestData inside individual project directories
+`D:\Users\Hal\Documents\Visual Studio 2026\Projects\backgammon\XgAnalytics\XgAnalytics.slnx`
 
-## Dependencies
+## Repo
 
-### ConvertXgToJson_Lib (commit `8fe6069`)
-Reads .xg/.xgp files; produces DecisionRow records.
+https://github.com/halheinrich/XgAnalytics — branch `main`.
 
-Key files:
-- DecisionRow.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/8fe6069/ConvertXgToJson_Lib/Models/DecisionRow.cs
-- XgDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/8fe6069/ConvertXgToJson_Lib/XgDecisionIterator.cs
-- XgMatchInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/8fe6069/ConvertXgToJson_Lib/XgMatchInfo.cs
-- XgGameInfo.cs: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/8fe6069/ConvertXgToJson_Lib/XgGameInfo.cs
-- ConvertXgToJson_Lib.csproj: https://raw.githubusercontent.com/halheinrich/ConvertXgToJson_Lib/8fe6069/ConvertXgToJson_Lib/ConvertXgToJson_Lib.csproj
+## Depends on
 
-### XgFilter_Lib (commit `9384c3b`)
-Filtering and classification of DecisionRow records.
+- **ConvertXgToJson_Lib** — `XgFileReader.ReadMatchInfo` / `ReadGameHeaders`, `XgMatchInfo`, `XgIteratorState`. The fast-path metadata readers are the sole parsing surface the analyses use.
+- **XgFilter_Lib** — project-referenced but not yet consumed by any analysis. Left in place for future filter-driven analyses.
 
-Key files:
-- Filtering/IDecisionFilter.cs: https://raw.githubusercontent.com/halheinrich/XgFilter_Lib/9384c3b/XgFilter_Lib/Filtering/IDecisionFilter.cs
-- Filtering/IMatchFilter.cs: https://raw.githubusercontent.com/halheinrich/XgFilter_Lib/9384c3b/XgFilter_Lib/Filtering/IMatchFilter.cs
-- Filtering/DecisionFilterSet.cs: https://raw.githubusercontent.com/halheinrich/XgFilter_Lib/9384c3b/XgFilter_Lib/Filtering/DecisionFilterSet.cs
-- FilteredDecisionIterator.cs: https://raw.githubusercontent.com/halheinrich/XgFilter_Lib/9384c3b/XgFilter_Lib/FilteredDecisionIterator.cs
-- XgFilter_Lib.csproj: https://raw.githubusercontent.com/halheinrich/XgFilter_Lib/9384c3b/XgFilter_Lib/XgFilter_Lib.csproj
+## Directory tree
 
-## Key facts
+```
+XgAnalytics/
+├── XgAnalytics.slnx
+├── INSTRUCTIONS.md
+├── XgAnalytics/
+│   ├── XgAnalytics.csproj          class library
+│   └── Analyses.cs                 static Analyses — all analyses live here
+└── XgAnalytics.Tests/
+    ├── XgAnalytics.Tests.csproj    xUnit
+    └── AnalysesTests.cs            one [Fact] per analysis
+```
 
-### DecisionRow.Board
-- `int[]` 26 elements
-- `board[0]` = opponent bar (never positive)
-- `board[1–24]` = points 1–24 from player on roll's perspective
-- `board[25]` = player bar (never negative)
-- Positive = player on roll; negative = opponent
+## Architecture
 
-### XGID
-- Always normalized to bottom-player perspective
+**Class library, not a console app.** There is no `Program.cs` and no `Main`. The entry points are xUnit `[Fact]` methods in `XgAnalytics.Tests`, which call static methods on `Analyses` and pass `ITestOutputHelper.WriteLine` as the log sink. Running an analysis means running its test. This is intentional — it gives progress output in the Test Explorer, lets Visual Studio be the runner, and avoids a separate console host.
 
-### Player names
-- Available on DecisionRow — use to group/count matches
+**Analysis method shape.** Every analysis is a `public static void` on `Analyses` with the signature `(string xgDir, Action<string> log)`. The `log` callback is written to as the analysis streams; structured results are written to a CSV at the end.
 
-## Current analyses
-- Player match count — list of players and how many matches they've played
+**File iteration.** Each analysis loops `Directory.EnumerateFiles(xgDir, "*.xg")`, parses each file via `XgFileReader.ReadMatchInfo` (for match-level analyses) or `XgFileReader.ReadGameHeaders` with a shared `XgIteratorState` (for game-level analyses), and uses `try { ... } catch { continue; }` to skip unreadable files. The exceptions are silently swallowed.
 
-## Shared rules
+**Progress reporting.** Each analysis prints a status line after match counts 1, 2, 4, 8, 16, … via an exponential-backoff `nextReport` counter. Rate (`matches/sec`) is computed from a `Stopwatch`.
 
-See `AGENTS.md` in the umbrella repo — applies to all sub-projects.
-`https://raw.githubusercontent.com/halheinrich/backgammon/main/AGENTS.md`
+**CSV output.** Each analysis writes its result CSV to a hard-coded path under `D:\Users\Hal\Documents\Excel\Backgammon\`. No prompt, no overwrite guard — running twice overwrites.
 
-## Session handoff
-After any commit:
-1. `git rev-parse HEAD` — note the short hash
-2. Update commit hash and URLs in this doc
-3. Return to Backgammon Umbrella project — update umbrella instructions doc
+**Score normalization (MatchScoreDistribution).** Keys are `(MatchLength, Away1, Away2, IsCrawford)` with `Away1 <= Away2` — the pair is swapped so both player perspectives collapse onto one bucket.
+
+## Public API
+
+```csharp
+public static class Analyses
+{
+    public static void PlayerMatchCount       (string xgDir, Action<string> log);
+    public static void NonStandardStarts      (string xgDir, Action<string> log);
+    public static void MatchScoreDistribution (string xgDir, Action<string> log);
+}
+```
+
+All three methods log progress incrementally via the `log` callback and write a CSV at a hard-coded path when done. None return a value; observable output is the `log` stream plus the CSV file.
+
+## Pitfalls
+
+- **Hard-coded CSV output paths** under `D:\Users\Hal\Documents\Excel\Backgammon\`. The directory must already exist — no `Directory.CreateDirectory` call. Won't run on a non-Hal machine without editing the source.
+- **Hard-coded test input path** in `AnalysesTests.cs` (`...\hhDb\Xg`). A commented-out line points at `TestData/xg`. Any test run on a fresh machine enumerates an empty directory or throws.
+- **Silent parse-failure swallow.** `catch { continue; }` hides corrupted-file exceptions entirely — neither logged nor counted. A batch can appear to "complete" while skipping a meaningful fraction of input.
+- **CSV overwrite with no guard.** Re-running an analysis clobbers its previous CSV without warning.
+- **XgFilter_Lib reference is load-bearing-looking but unused.** Don't assume analyses filter anything today — they iterate every `.xg` in `xgDir`.
+
+## Subproject-internal next steps
+
+None pending.
