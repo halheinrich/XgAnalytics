@@ -18,7 +18,7 @@ public static class Analyses
         int matchCount = 0;
         int nextReport = 1;
 
-        foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
+        foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
             XgMatchInfo info;
             try { info = XgFileReader.ReadMatchInfo(path); }
@@ -83,7 +83,7 @@ public static class Analyses
         int matchCount = 0;
         int nextReport = 1;
 
-        foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
+        foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
             int gameNum = 0;
             try
@@ -149,7 +149,7 @@ public static class Analyses
         int matchCount = 0;
         int nextReport = 1;
 
-        foreach (var path in Directory.EnumerateFiles(xgDir, "*.xg"))
+        foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
             try
             {
@@ -227,4 +227,12 @@ public static class Analyses
             return $"\"{value.Replace("\"", "\"\"")}\"";
         return value;
     }
+
+    /// <summary>Enumerates all XG-format files in a directory: both
+    /// <c>*.xg</c> (match files) and <c>*.xgp</c> (position files). Order is
+    /// .xg first then .xgp; within each extension, filesystem order
+    /// (non-deterministic per OS).</summary>
+    internal static IEnumerable<string> EnumerateXgFormatFiles(string xgDir) =>
+        Directory.EnumerateFiles(xgDir, "*.xg")
+            .Concat(Directory.EnumerateFiles(xgDir, "*.xgp"));
 }
