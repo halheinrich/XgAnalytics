@@ -32,7 +32,7 @@ XgAnalytics/
 │   └── Analyses.cs                 static Analyses — all analyses live here
 └── XgAnalytics.Tests/
     ├── XgAnalytics.Tests.csproj    xUnit
-    └── AnalysesTests.cs            one [Fact] per analysis
+    └── AnalysesTests.cs            one [Fact] per analysis plus a self-contained helper test for EnumerateXgFormatFiles
 ```
 
 ## Architecture
@@ -41,7 +41,7 @@ XgAnalytics/
 
 **Analysis method shape.** Every analysis is a `public static void` on `Analyses` with the signature `(string xgDir, Action<string> log)`. The `log` callback is written to as the analysis streams; structured results are written to a CSV at the end.
 
-**File iteration.** Each analysis loops the private `EnumerateXgFormatFiles` helper, which yields `*.xg` match files concatenated with `*.xgp` position files (both formats — `XgFileReader` handles both). Each file is parsed via `XgFileReader.ReadMatchInfo` (for match-level analyses) or `XgFileReader.ReadGameHeaders` with a shared `XgIteratorState` (for game-level analyses), and `try { ... } catch { continue; }` skips unreadable files. The exceptions are silently swallowed. The helper mirrors the same-named private helper in `ConvertXgToJson_Lib.XgDecisionIterator` — cross-subproject duplication accepted until a third consumer warrants promoting it to a shared public utility on `XgFileReader`.
+**File iteration.** Each analysis loops the `internal` `EnumerateXgFormatFiles` helper (visible to `XgAnalytics.Tests` via `InternalsVisibleTo`, declared in the csproj), which yields `*.xg` match files concatenated with `*.xgp` position files (both formats — `XgFileReader` handles both). Each file is parsed via `XgFileReader.ReadMatchInfo` (for match-level analyses) or `XgFileReader.ReadGameHeaders` with a shared `XgIteratorState` (for game-level analyses), and `try { ... } catch { continue; }` skips unreadable files. The exceptions are silently swallowed. The helper mirrors the same-named private helper in `ConvertXgToJson_Lib.XgDecisionIterator` — cross-subproject duplication accepted until a third consumer warrants promoting it to a shared public utility on `XgFileReader`.
 
 **Progress reporting.** Each analysis prints a status line after match counts 1, 2, 4, 8, 16, … via an exponential-backoff `nextReport` counter. Rate (`matches/sec`) is computed from a `Stopwatch`.
 

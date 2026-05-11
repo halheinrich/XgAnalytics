@@ -20,9 +20,10 @@ public static class Analyses
 
         foreach (var path in EnumerateXgFormatFiles(xgDir))
         {
-            XgMatchInfo info;
+            XgMatchInfo? info;
             try { info = XgFileReader.ReadMatchInfo(path); }
             catch { continue; }
+            if (info is null) continue;
 
             string matchId = Path.GetFileNameWithoutExtension(path);
             RegisterPlayer(info.Player1, matchId, playerMatches);
