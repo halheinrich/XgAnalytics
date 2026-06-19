@@ -29,17 +29,27 @@ XgAnalytics/
 ├── INSTRUCTIONS.md
 ├── XgAnalytics/
 │   ├── XgAnalytics.csproj          class library
-│   └── Analyses.cs                 static Analyses — all analyses live here
+│   ├── Analyses.cs                 static Analyses — all analyses live here
+│   └── AnalysisResults.cs          immutable result records the Compute* methods return
 └── XgAnalytics.Tests/
-    ├── XgAnalytics.Tests.csproj    xUnit
-    └── AnalysesTests.cs            one [Fact] per analysis
+    ├── XgAnalytics.Tests.csproj    xUnit + FluentAssertions
+    ├── TestPaths.cs                shared-TestData path helper (mirrors CXJ)
+    └── AnalysesTests.cs            ad-hoc runner facts + corpus/fixture tests
 ```
 
 ## Architecture
 
 **Class library, not a console app.** There is no `Program.cs` and no `Main`. The entry points are xUnit `[Fact]` methods in `XgAnalytics.Tests`, which call static methods on `Analyses` and pass `ITestOutputHelper.WriteLine` as the log sink. Running an analysis means running its test. This is intentional — it gives progress output in the Test Explorer, lets Visual Studio be the runner, and avoids a separate console host.
 
-**Analysis method shape.** Every analysis is a `public static void` on `Analyses` with the signature `(string xgDir, Action<string> log)`. Each analysis writes progress to the `log` callback as it streams; structured results land in a CSV at the end.
+**Analysis method shape — compute / persist split.** Each analysis is two
+methods on `Analyses`. `Compute*(string xgDir, Action<string> log)` does the
+streaming scan, writes progress + summary to the `log` callback, and **returns**
+the aggregated data as an immutable result record (`AnalysisResults.cs`) — no
+file output. The matching `public static void` wrapper `(string xgDir,
+Action<string> log)` calls the aggregator, then writes the result to a CSV. The
+split keeps the machine-dependent file write out of the computation path so the
+aggregation is testable without touching disk; the `log` callback is the only
+side effect the aggregator has, and it is dependency-injected.
 
 **File iteration.** Each analysis calls `XgFileReader.EnumerateXgFormatFiles` (the shared public helper in `ConvertXgToJson_Lib`), which yields `*.xg` match files concatenated with `*.xgp` position files. Each file is parsed via `XgFileReader.ReadMatchInfo` (for match-level analyses) or `XgFileReader.ReadGameHeaders` with a shared `XgIteratorState` (for game-level analyses), and `try { ... } catch { continue; }` silently skips unreadable files (see Pitfalls). Enumeration and its tests now single-source from the producer (`XgFileReaderDiscoveryTests`); the formerly-duplicated private helper here has been removed.
 
@@ -54,18 +64,30 @@ XgAnalytics/
 ```csharp
 public static class Analyses
 {
+    // Aggregators — scan + log, return the data, no file output.
+    public static PlayerMatchCountResult       ComputePlayerMatchCount       (string xgDir, Action<string> log);
+    public static NonStandardStartsResult      ComputeNonStandardStarts      (string xgDir, Action<string> log);
+    public static MatchScoreDistributionResult ComputeMatchScoreDistribution (string xgDir, Action<string> log);
+
+    // Persistence wrappers — call the aggregator, then write a CSV.
     public static void PlayerMatchCount       (string xgDir, Action<string> log);
     public static void NonStandardStarts      (string xgDir, Action<string> log);
     public static void MatchScoreDistribution (string xgDir, Action<string> log);
 }
 ```
 
-All three methods log progress incrementally via the `log` callback and write a CSV at a hard-coded path when done. None return a value; observable output is the `log` stream plus the CSV file.
+The `Compute*` methods log progress incrementally via the `log` callback and
+return their aggregated result (`PlayerMatchCountResult`,
+`NonStandardStartsResult`, `MatchScoreDistributionResult` in
+`AnalysisResults.cs` — immutable records exposing read-only views; the score
+distribution is keyed by the normalized `MatchScoreKey`). The `void` wrappers add
+the CSV write to a hard-coded path; their observable output is the `log` stream
+plus the CSV file.
 
 ## Pitfalls
 
-- **Hard-coded CSV output paths** under `D:\Users\Hal\Documents\Excel\Backgammon\`. The directory must already exist — no `Directory.CreateDirectory` call. Won't run on a non-Hal machine without editing the source.
-- **Hard-coded test input path** in `AnalysesTests.cs` (`...\hhDb\Xg`). A commented-out line points at `TestData/xg`. Any test run on a fresh machine enumerates an empty directory or throws.
+- **Hard-coded CSV output paths** under `D:\Users\Hal\Documents\Excel\Backgammon\`, baked into the `void` wrappers. The directory must already exist — no `Directory.CreateDirectory` call. The wrappers won't run on a non-Hal machine; the `Compute*` aggregators carry no such dependency.
+- **Two test layers, both green-on-any-machine.** The three `[Fact]`s named after the analyses are the *ad-hoc runner* — they point at Hal's local `...\hhDb\Xg` and write CSVs, and self-skip (early return) when either that input dir or the CSV output dir is absent. The deterministic CI coverage is separate: corpus shape-invariant tests over the shared `TestData/xg` (guarded for an empty/absent corpus) plus a pinned-fixture discrimination test over `TestData/FixtureFiles`. Never make the corpus tests pin a filename or count — that corpus churns (see `../AGENTS.md` TestData convention).
 - **Silent parse-failure swallow.** `catch { continue; }` hides corrupted-file exceptions entirely — neither logged nor counted. A batch can appear to "complete" while skipping a meaningful fraction of input.
 - **CSV overwrite with no guard.** Re-running an analysis clobbers its previous CSV without warning.
 - **Unfiltered iteration.** Despite the `XgFilter_Lib` project reference, no analysis filters — every `.xg`/`.xgp` in `xgDir` is processed.

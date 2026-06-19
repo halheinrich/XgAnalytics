@@ -1,4 +1,4 @@
-﻿using ConvertXgToJson_Lib;
+using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 using System.Diagnostics;
 
@@ -8,9 +8,14 @@ public static class Analyses
 {
     // -------------------------------------------------------------------------
     //  Analysis: Player match count
+    //
+    //  Compute* aggregates the corpus and returns the data (with progress +
+    //  summary logging via `log`); the void wrapper persists it to CSV. The
+    //  split keeps the machine-dependent file write out of the computation path
+    //  so the aggregation is testable without writing to disk.
     // -------------------------------------------------------------------------
 
-    public static void PlayerMatchCount(string xgDir, Action<string> log)
+    public static PlayerMatchCountResult ComputePlayerMatchCount(string xgDir, Action<string> log)
     {
         var playerMatches = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var sw = Stopwatch.StartNew();
@@ -47,13 +52,14 @@ public static class Analyses
         var sorted = playerMatches
             .OrderByDescending(kv => kv.Value.Count)
             .ThenBy(kv => kv.Key)
+            .Select(kv => new PlayerMatchTally(kv.Key, kv.Value.ToArray()))
             .ToList();
 
         log("");
         log($"{"Player",-30} {"Matches",7}");
         log(new string('-', 39));
-        foreach (var (player, matches) in sorted)
-            log($"{player,-30} {matches.Count,7}");
+        foreach (var p in sorted)
+            log($"{p.Player,-30} {p.MatchCount,7}");
         log(new string('-', 39));
         log($"{"Total players:",-30} {sorted.Count,7}");
         log("");
@@ -61,11 +67,23 @@ public static class Analyses
         log($"Total time    : {totalSecs:F1}s");
         log($"Avg rate      : {finalRate:F2} matches/sec");
 
+        int distinctMatchCount = playerMatches.Values
+            .SelectMany(s => s)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+        return new PlayerMatchCountResult(sorted, distinctMatchCount);
+    }
+
+    public static void PlayerMatchCount(string xgDir, Action<string> log)
+    {
+        var result = ComputePlayerMatchCount(xgDir, log);
+
         string csvPath = @"D:\Users\Hal\Documents\Excel\Backgammon\PlayerMatchCount.csv";
         using var writer = new StreamWriter(csvPath);
         writer.WriteLine("Player,Matches");
-        foreach (var (player, matches) in sorted)
-            writer.WriteLine($"{CsvEscape(player)},{matches.Count}");
+        foreach (var p in result.Players)
+            writer.WriteLine($"{CsvEscape(p.Player)},{p.MatchCount}");
 
         log($"CSV written to: {csvPath}");
     }
@@ -74,9 +92,9 @@ public static class Analyses
     //  Analysis: Non-standard game starts
     // -------------------------------------------------------------------------
 
-    public static void NonStandardStarts(string xgDir, Action<string> log)
+    public static NonStandardStartsResult ComputeNonStandardStarts(string xgDir, Action<string> log)
     {
-        var nonStandard = new List<(string Match, int Game, string Player1, string Player2)>();
+        var nonStandard = new List<NonStandardStart>();
         var sw = Stopwatch.StartNew();
         var state = new XgIteratorState();
 
@@ -94,7 +112,7 @@ public static class Analyses
                     gameNum++;
                     gameCount++;
                     if (!game.IsStandardStart)
-                        nonStandard.Add((
+                        nonStandard.Add(new NonStandardStart(
                             Path.GetFileNameWithoutExtension(path),
                             gameNum,
                             state.MatchInfo?.Player1 ?? "",
@@ -126,10 +144,17 @@ public static class Analyses
         log($"Total time        : {totalSecs:F1}s");
         log($"Avg rate          : {finalRate:F2} matches/sec");
 
+        return new NonStandardStartsResult(nonStandard, gameCount, matchCount);
+    }
+
+    public static void NonStandardStarts(string xgDir, Action<string> log)
+    {
+        var result = ComputeNonStandardStarts(xgDir, log);
+
         string csvPath = @"D:\Users\Hal\Documents\Excel\Backgammon\NonStandardStarts.csv";
         using var writer = new StreamWriter(csvPath);
         writer.WriteLine("Match,Game,Player1,Player2");
-        foreach (var (match, game, p1, p2) in nonStandard)
+        foreach (var (match, game, p1, p2) in result.NonStandard)
             writer.WriteLine($"{CsvEscape(match)},{game},{CsvEscape(p1)},{CsvEscape(p2)}");
 
         log($"CSV written to: {csvPath}");
@@ -139,10 +164,10 @@ public static class Analyses
     //  Analysis: Match score distribution
     // -------------------------------------------------------------------------
 
-    public static void MatchScoreDistribution(string xgDir, Action<string> log)
+    public static MatchScoreDistributionResult ComputeMatchScoreDistribution(string xgDir, Action<string> log)
     {
         // Key: (MatchLength, Away1, Away2, IsCrawford) where Away1 <= Away2 (normalized)
-        var counts = new Dictionary<(int MatchLength, int Away1, int Away2, bool IsCrawford), int>();
+        var counts = new Dictionary<MatchScoreKey, int>();
         var sw = Stopwatch.StartNew();
         var state = new XgIteratorState();
 
@@ -165,7 +190,7 @@ public static class Analyses
                     // Normalize: lower away score first
                     if (a1 > a2) (a1, a2) = (a2, a1);
 
-                    var key = (ml, a1, a2, game.IsCrawfordGame);
+                    var key = new MatchScoreKey(ml, a1, a2, game.IsCrawfordGame);
                     counts.TryGetValue(key, out int existing);
                     counts[key] = existing + 1;
                 }
@@ -192,16 +217,23 @@ public static class Analyses
         log($"Total time    : {totalSecs:F1}s");
         log($"Avg rate      : {finalRate:F2} matches/sec");
 
+        return new MatchScoreDistributionResult(counts, gameCount, matchCount);
+    }
+
+    public static void MatchScoreDistribution(string xgDir, Action<string> log)
+    {
+        var result = ComputeMatchScoreDistribution(xgDir, log);
+
         string csvPath = @"D:\Users\Hal\Documents\Excel\Backgammon\MatchScoreDistribution.csv";
         using var writer = new StreamWriter(csvPath);
         writer.WriteLine("MatchLength,Away1,Away2,IsCrawford,Occurs");
-        foreach (var ((ml, a1, a2, isCrawford), occurs) in counts
+        foreach (var (key, occurs) in result.Counts
             .OrderBy(kv => kv.Key.MatchLength)
             .ThenBy(kv => kv.Key.Away1)
             .ThenBy(kv => kv.Key.Away2)
             .ThenBy(kv => kv.Key.IsCrawford))
         {
-            writer.WriteLine($"{ml},{a1},{a2},{(isCrawford ? 1 : 0)},{occurs}");
+            writer.WriteLine($"{key.MatchLength},{key.Away1},{key.Away2},{(key.IsCrawford ? 1 : 0)},{occurs}");
         }
         log($"CSV written to: {csvPath}");
     }
