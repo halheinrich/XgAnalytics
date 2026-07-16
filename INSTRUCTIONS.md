@@ -61,8 +61,20 @@ side effect the aggregator has, and it is dependency-injected.
 
 ## Public API
 
+**There is no public API.** This is a personal analysis tool driven by its own
+test project, not a library: nothing in this assembly is `public`. There is no
+exe either — the `[Fact]` methods in `XgAnalytics.Tests` are the runner (see
+Architecture), so the test assembly is the *only* caller, and it reaches
+everything below through the `InternalsVisibleTo` in `XgAnalytics.csproj`.
+
+The internal testable seams are documented here because they are what a
+maintainer tests and modifies against — not because anything outside may call
+them. Should a real consumer ever appear, the answer is to design a public
+surface deliberately (extracting an `XgAnalytics_Lib` if the analyses and the
+CSV wrappers want separating), not to widen these back to `public` by default.
+
 ```csharp
-public static class Analyses
+internal static class Analyses
 {
     // Aggregators — scan + log, return the data, no file output.
     public static PlayerMatchCountResult       ComputePlayerMatchCount       (string xgDir, Action<string> log);
@@ -80,7 +92,9 @@ The `Compute*` methods log progress incrementally via the `log` callback and
 return their aggregated result (`PlayerMatchCountResult`,
 `NonStandardStartsResult`, `MatchScoreDistributionResult` in
 `AnalysisResults.cs` — immutable records exposing read-only views; the score
-distribution is keyed by the normalized `MatchScoreKey`). The `void` wrappers add
+distribution is keyed by the normalized `MatchScoreKey`). Those records, and the
+`PlayerMatchTally` / `NonStandardStart` elements they carry, are `internal` for
+the same reason as `Analyses` — they are these methods' return types. The `void` wrappers add
 the CSV write to a hard-coded path; their observable output is the `log` stream
 plus the CSV file.
 

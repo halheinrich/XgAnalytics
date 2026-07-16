@@ -8,6 +8,10 @@ namespace XgAnalytics;
 //  `void` analysis methods. They expose the aggregated data as read-only views
 //  so callers (the CSV-writing wrappers, and tests asserting shape invariants)
 //  can consume the result without re-running the scan or touching the corpus.
+//
+//  All `internal`, matching `Analyses` — they are its return types, and this
+//  library has no consumer outside its own test project (which sees them via
+//  the `InternalsVisibleTo` in XgAnalytics.csproj).
 // -----------------------------------------------------------------------------
 
 /// <summary>
@@ -16,7 +20,7 @@ namespace XgAnalytics;
 /// </summary>
 /// <param name="Player">Player name; never blank (blank names are not registered).</param>
 /// <param name="MatchIds">Distinct match IDs this player appears in; always non-empty.</param>
-public sealed record PlayerMatchTally(string Player, IReadOnlyCollection<string> MatchIds)
+internal sealed record PlayerMatchTally(string Player, IReadOnlyCollection<string> MatchIds)
 {
     /// <summary>Number of distinct matches this player appears in (≥ 1).</summary>
     public int MatchCount => MatchIds.Count;
@@ -34,7 +38,7 @@ public sealed record PlayerMatchTally(string Player, IReadOnlyCollection<string>
 /// Count of distinct match IDs across all players. Bounded above by the number
 /// of XG-format files enumerated (a file registers at most one match ID).
 /// </param>
-public sealed record PlayerMatchCountResult(
+internal sealed record PlayerMatchCountResult(
     IReadOnlyList<PlayerMatchTally> Players,
     int DistinctMatchCount);
 
@@ -45,7 +49,7 @@ public sealed record PlayerMatchCountResult(
 /// <param name="Game">1-based game number within its match (≥ 1).</param>
 /// <param name="Player1">Player 1 name, or empty if unavailable.</param>
 /// <param name="Player2">Player 2 name, or empty if unavailable.</param>
-public sealed record NonStandardStart(string Match, int Game, string Player1, string Player2);
+internal sealed record NonStandardStart(string Match, int Game, string Player1, string Player2);
 
 /// <summary>
 /// Result of <see cref="Analyses.ComputeNonStandardStarts"/>: the games whose
@@ -57,7 +61,7 @@ public sealed record NonStandardStart(string Match, int Game, string Player1, st
 /// </param>
 /// <param name="GameCount">Total games scanned across all matches.</param>
 /// <param name="MatchCount">Total matches (files) scanned.</param>
-public sealed record NonStandardStartsResult(
+internal sealed record NonStandardStartsResult(
     IReadOnlyList<NonStandardStart> NonStandard,
     int GameCount,
     int MatchCount);
@@ -71,7 +75,7 @@ public sealed record NonStandardStartsResult(
 /// <param name="Away1">Lower away score (points still needed); ≤ <see cref="Away2"/>.</param>
 /// <param name="Away2">Higher away score (points still needed).</param>
 /// <param name="IsCrawford">Whether the Crawford rule applied to the game.</param>
-public readonly record struct MatchScoreKey(int MatchLength, int Away1, int Away2, bool IsCrawford);
+internal readonly record struct MatchScoreKey(int MatchLength, int Away1, int Away2, bool IsCrawford);
 
 /// <summary>
 /// Result of <see cref="Analyses.ComputeMatchScoreDistribution"/>: how many
@@ -83,7 +87,7 @@ public readonly record struct MatchScoreKey(int MatchLength, int Away1, int Away
 /// </param>
 /// <param name="GameCount">Total games scanned across all matches.</param>
 /// <param name="MatchCount">Total matches (files) scanned.</param>
-public sealed record MatchScoreDistributionResult(
+internal sealed record MatchScoreDistributionResult(
     IReadOnlyDictionary<MatchScoreKey, int> Counts,
     int GameCount,
     int MatchCount);
