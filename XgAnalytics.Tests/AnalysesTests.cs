@@ -1,5 +1,5 @@
 using ConvertXgToJson_Lib;
-using FluentAssertions;
+using AwesomeAssertions;
 using Xunit.Abstractions;
 
 namespace XgAnalytics.Tests;
