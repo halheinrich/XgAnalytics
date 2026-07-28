@@ -32,7 +32,7 @@ XgAnalytics/
 │   ├── Analyses.cs                 static Analyses — all analyses live here
 │   └── AnalysisResults.cs          immutable result records the Compute* methods return
 └── XgAnalytics.Tests/
-    ├── XgAnalytics.Tests.csproj    xUnit + FluentAssertions
+    ├── XgAnalytics.Tests.csproj    xUnit + AwesomeAssertions
     ├── TestPaths.cs                shared-TestData path helper (mirrors CXJ)
     └── AnalysesTests.cs            ad-hoc runner facts + corpus/fixture tests
 ```
