@@ -1,3 +1,4 @@
+﻿using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using AwesomeAssertions;
 using Xunit.Abstractions;
@@ -18,6 +19,13 @@ public class AnalysesTests(ITestOutputHelper output)
 
     private const string XgDir = @"D:\Users\Hal\Documents\eXtremeGammon\BatchAnalyze\Matches\hhDb\Xg";
     private const string CsvOutputDir = @"D:\Users\Hal\Documents\Excel\Backgammon";
+
+    // DuplicateProblems' natural input is a BatchAnalyze *Positions* folder
+    // rather than the match database above — that is the folder-cleanup use
+    // case it exists for (halheinrich/backgammon#117). A knob: repoint it at
+    // whichever folder is being cleaned. Absent folder => the fact self-skips.
+    private const string PositionsDir =
+        @"D:\Users\Hal\Documents\eXtremeGammon\BatchAnalyze\Positions\Move2\3a3a";
 
     private static bool AdHocDirsPresent =>
         Directory.Exists(XgDir) && Directory.Exists(CsvOutputDir);
@@ -41,6 +49,13 @@ public class AnalysesTests(ITestOutputHelper output)
     {
         if (!AdHocDirsPresent) return;
         Analyses.MatchScoreDistribution(XgDir, output.WriteLine);
+    }
+
+    [Fact]
+    public void DuplicateProblems()
+    {
+        if (!Directory.Exists(PositionsDir) || !Directory.Exists(CsvOutputDir)) return;
+        Analyses.DuplicateProblems(PositionsDir, output.WriteLine);
     }
 
     // -------------------------------------------------------------------------
@@ -171,4 +186,155 @@ public class AnalysesTests(ITestOutputHelper output)
             try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
         }
     }
+
+    // -------------------------------------------------------------------------
+    //  DuplicateProblems (halheinrich/backgammon#117)
+    //
+    //  Layer 1 corpus invariants + Layer 2 discrimination, as above, plus a
+    //  synthesized-record pin for the fail-open rule. The fail-open case is
+    //  deliberately not sourced from `TestData/xg`: the corpus is
+    //  fixture-agnostic and may be empty, and the in-tree producer stamps the
+    //  Jacoby fact on every money record it emits — so the no-key rung would
+    //  never fire from real data here even though it is a live population for
+    //  records from laxer producers (halheinrich/backgammon#120).
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void DuplicateProblems_OverCorpus_HoldsShapeInvariants()
+    {
+        if (!CorpusPresent) return;
+
+        int fileCount = XgFileReader.EnumerateXgFormatFiles(TestPaths.XgDir).Count();
+        var result = Analyses.ComputeDuplicateProblems(TestPaths.XgDir, output.WriteLine);
+
+        result.FileCount.Should().BeLessThanOrEqualTo(fileCount,
+            "only enumerated files can contribute decisions");
+        result.NoKeyCount.Should().BeLessThanOrEqualTo(result.ProblemCount,
+            "no-key items are a subset of the decisions scanned");
+        result.DistinctProblemCount.Should().BeLessThanOrEqualTo(result.ProblemCount,
+            "collapsing copies can only reduce the distinct count");
+        result.RedundantProblemCount.Should().Be(
+            result.Groups.Sum(g => g.RedundantCount),
+            "every redundant occurrence is a non-keeper member of exactly one class");
+
+        // Vacuous-safe per-element checks: a corpus may legitimately contain no
+        // duplicates at all, so these must pass over an empty group list.
+        result.Groups.All(g => g.Occurrences.Count >= 2).Should().BeTrue(
+            "a class exists only because a second copy contested the key");
+        result.Groups.All(g => g.Keeper == g.Occurrences[0]).Should().BeTrue(
+            "the keeper is the class's first occurrence");
+        static bool OrdinalSortedByFilename(DuplicateProblemGroup group)
+        {
+            var names = group.Occurrences.Select(id => id.Filename).ToList();
+            return names.SequenceEqual(names.Order(StringComparer.Ordinal));
+        }
+        result.Groups.All(OrdinalSortedByFilename).Should().BeTrue(
+            "occurrences are ordered so the ordinal-first filename keeps");
+        result.Groups.Select(g => g.Key).Should().OnlyHaveUniqueItems(
+            "one class per content key");
+        result.Groups.Select(g => g.Key).Should().BeInAscendingOrder(
+            "classes are reported in key order");
+
+        result.RedundantFiles.Should().OnlyHaveUniqueItems(
+            "a file is listed at most once");
+        result.RedundantFiles.Should().BeInAscendingOrder(StringComparer.Ordinal,
+            "the redundant-file list is ordinal-sorted");
+        var keeperFiles = result.Groups.Select(g => g.Keeper.Filename).ToHashSet(StringComparer.Ordinal);
+        result.RedundantFiles.Any(keeperFiles.Contains).Should().BeFalse(
+            "a file that keeps any problem is never wholly redundant");
+    }
+
+    [Fact]
+    public void DuplicateProblems_OverDuplicatedFixture_ReportsTheOrdinalLaterCopyRedundant()
+    {
+        if (!File.Exists(TestPaths.AchimMuellerSeqXg)) return;
+
+        string tempDir = Path.Combine(
+            Path.GetTempPath(), "XgAnalytics.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            // Two byte-identical copies under different names: every problem in
+            // the match now has exactly one duplicate, and the ordinal-later
+            // name keeps nothing. This is the discrimination check — an
+            // always-empty result would satisfy Layer 1 but fails here.
+            File.Copy(TestPaths.AchimMuellerSeqXg, Path.Combine(tempDir, "a.xg"));
+            File.Copy(TestPaths.AchimMuellerSeqXg, Path.Combine(tempDir, "b.xg"));
+
+            var result = Analyses.ComputeDuplicateProblems(tempDir, output.WriteLine);
+
+            result.FileCount.Should().Be(2, "both copies carry decisions");
+            result.NoKeyCount.Should().Be(0,
+                "every decision in this pinned fixture derives a key — the exact "
+                + "redundant-file claim below assumes the fail-open rung never fires");
+            result.Groups.Should().NotBeEmpty("identical copies duplicate every problem");
+            result.Groups.Should().OnlyContain(g => g.Keeper.Filename == "a.xg",
+                "the ordinal-first filename keeps");
+            result.RedundantFiles.Should().Equal(["b.xg"],
+                "the second copy contributes no problem the first does not");
+            result.DistinctProblemCount.Should().Be(result.ProblemCount / 2,
+                "each problem appears exactly twice");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public void GroupDuplicateProblems_MoneyRecordWithoutJacoby_FailsOpen_AndIsNeverRedundant()
+    {
+        // Control — the pair is otherwise identical, so with the Jacoby fact
+        // present it derives one key, collapses, and "b.xgp" is redundant.
+        // Without this, the fail-open assertions below could pass for the wrong
+        // reason (records that simply never grouped).
+        var stamped = Analyses.GroupDuplicateProblems(
+            [MoneyCubeRecord("a.xgp", isJacoby: true), MoneyCubeRecord("b.xgp", isJacoby: true)]);
+
+        stamped.NoKeyCount.Should().Be(0, "a stamped money record derives a key");
+        stamped.Groups.Should().ContainSingle("the two records are the same problem");
+        stamped.DistinctProblemCount.Should().Be(1);
+        stamped.RedundantFiles.Should().Equal(["b.xgp"], "the ordinal-first filename keeps");
+
+        // Fail open — the same pair with the money grammar's Jacoby fact absent
+        // has no derivable key. Underivability is not equality: neither copy
+        // forms a class, and neither is ever reported redundant.
+        var unstamped = Analyses.GroupDuplicateProblems(
+            [MoneyCubeRecord("a.xgp", isJacoby: null), MoneyCubeRecord("b.xgp", isJacoby: null)]);
+
+        unstamped.NoKeyCount.Should().Be(2, "a money record without Jacoby is the no-key rung");
+        unstamped.Groups.Should().BeEmpty("no-key items never form a class");
+        unstamped.RedundantFiles.Should().BeEmpty(
+            "an item with no derivable key is never reported redundant");
+        unstamped.DistinctProblemCount.Should().Be(2,
+            "each no-key item counts as its own distinct problem");
+        unstamped.RedundantProblemCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// A money cube decision from the standard opening position, differing only
+    /// in whether the Jacoby fact is stamped. Centered cube, because that is
+    /// exactly where Jacoby is answer-changing (halheinrich/backgammon#120).
+    /// </summary>
+    private static BgDecisionData MoneyCubeRecord(string filename, bool? isJacoby) => new()
+    {
+        Id = new XgpDecisionId(filename),
+        Position = new PositionData
+        {
+            Mop = StandardStartBoard,
+            OnRollNeeds = 0,          // 0/0 away = money
+            OpponentNeeds = 0,
+            CubeSize = 1,
+            CubeOwner = CubeOwner.Centered,
+            IsJacoby = isJacoby,
+        },
+        Decision = new DecisionData { IsCube = true },
+    };
+
+    /// <summary>
+    /// On-roll-relative standard opening position: index 0 is the opponent's
+    /// bar, 1–24 the points, 25 the on-roll bar. Fifteen checkers a side.
+    /// </summary>
+    private static int[] StandardStartBoard =>
+        [0, -2, 0, 0, 0, 0, 5, 0, 3, 0, 0, 0, -5, 5, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0];
 }

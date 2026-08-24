@@ -1,3 +1,5 @@
+﻿using BgDataTypes_Lib;
+
 namespace XgAnalytics;
 
 // -----------------------------------------------------------------------------
@@ -91,3 +93,93 @@ internal sealed record MatchScoreDistributionResult(
     IReadOnlyDictionary<MatchScoreKey, int> Counts,
     int GameCount,
     int MatchCount);
+
+
+/// <summary>
+/// One content-equivalence class of duplicate problems: a
+/// <see cref="ProblemKey"/> that two or more scanned decisions derived, and
+/// the occurrences that derived it.
+/// </summary>
+/// <param name="Key">The shared content identity (see <see cref="ProblemKey"/>).</param>
+/// <param name="Occurrences">
+/// The decisions that derived <paramref name="Key"/>, ordered by
+/// <see cref="DecisionId.Filename"/> ordinal-ascending (ties — several
+/// occurrences inside one file — keep scan order). Always holds two or more
+/// entries; a key with a single occurrence is not a duplicate and forms no
+/// class.
+/// </param>
+internal sealed record DuplicateProblemGroup(ProblemKey Key, IReadOnlyList<DecisionId> Occurrences)
+{
+    /// <summary>
+    /// The surviving occurrence — the ordinal-first filename in the class, per
+    /// the ratified keeper rule. Report-only: nothing here deletes anything.
+    /// </summary>
+    public DecisionId Keeper => Occurrences[0];
+
+    /// <summary>How many occurrences in this class are redundant copies (≥ 1).</summary>
+    public int RedundantCount => Occurrences.Count - 1;
+}
+
+/// <summary>
+/// Result of <see cref="Analyses.ComputeDuplicateProblems"/>: the corpus's
+/// content-duplicate problems, grouped by <see cref="ProblemKey"/>, plus the
+/// files that carry nothing but redundant copies.
+///
+/// <para>
+/// <b>Report-only.</b> Nothing here deletes; <see cref="RedundantFiles"/> is a
+/// recommendation the caller acts on (halheinrich/backgammon#117).
+/// </para>
+///
+/// <para>
+/// <b>Fail-open on an underivable key.</b> A decision with no derivable
+/// <see cref="ProblemKey"/> (the no-key rung — see
+/// <see cref="ProblemKey.TryDerive"/>) forms no class and is never reported
+/// redundant, even when several such decisions are otherwise identical:
+/// treating underivability as equality would collapse unrelated problems.
+/// It counts toward both <see cref="ProblemCount"/> and
+/// <see cref="NoKeyCount"/>, and as its own entry in
+/// <see cref="DistinctProblemCount"/>. Consequently a file holding one keeps
+/// that file out of <see cref="RedundantFiles"/>.
+/// </para>
+/// </summary>
+/// <param name="Groups">
+/// The duplicate classes, ordered by <see cref="ProblemKey"/>. Empty when
+/// nothing collapsed.
+/// </param>
+/// <param name="RedundantFiles">
+/// Bare filenames (relative to the scanned directory — the scan is one flat
+/// directory, so names are unique within it), ordinal-ascending, of files
+/// every one of whose problems survives elsewhere: the file contributed at
+/// least one decision, and not one of its decisions is either a class keeper,
+/// a problem seen only there, or a no-key item. Deleting exactly this set
+/// loses no problem.
+/// </param>
+/// <param name="FileCount">
+/// Distinct files that contributed at least one decision. Bounded above by the
+/// number of XG-format files enumerated; files that were unreadable or carried
+/// no analysed decision are excluded (the scan logs those totals).
+/// </param>
+/// <param name="ProblemCount">Total decisions scanned, no-key items included.</param>
+/// <param name="DistinctProblemCount">
+/// Distinct problems: one per derived <see cref="ProblemKey"/>, plus one per
+/// no-key item (fail-open — no-key items never merge, with each other or with
+/// anything else). Equals <see cref="ProblemCount"/> when nothing collapsed.
+/// </param>
+/// <param name="NoKeyCount">
+/// Decisions with no derivable key; ≤ <see cref="ProblemCount"/>.
+/// </param>
+internal sealed record DuplicateProblemsResult(
+    IReadOnlyList<DuplicateProblemGroup> Groups,
+    IReadOnlyList<string> RedundantFiles,
+    int FileCount,
+    int ProblemCount,
+    int DistinctProblemCount,
+    int NoKeyCount)
+{
+    /// <summary>
+    /// Redundant problem occurrences — the copies beyond the first in every
+    /// class. Equals <see cref="ProblemCount"/> − <see cref="DistinctProblemCount"/>
+    /// and the sum of every group's <see cref="DuplicateProblemGroup.RedundantCount"/>.
+    /// </summary>
+    public int RedundantProblemCount => ProblemCount - DistinctProblemCount;
+}
