@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\XgAnalytics\XgAnalytics.csproj" />
+    <!-- The producer's record builders: tests build decision records through
+         TestRecords rather than restating the records' construction. -->
+    <ProjectReference Include="..\..\BgDataTypes_Lib\BgDataTypes_Lib.TestSupport\BgDataTypes_Lib.TestSupport.csproj" />
   </ItemGroup>
 
   <ItemGroup>

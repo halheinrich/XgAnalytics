@@ -19,7 +19,8 @@ https://github.com/halheinrich/XgAnalytics — branch `main`.
 ## Depends on
 
 - **ConvertXgToJson_Lib** — file discovery (`XgFileReader.EnumerateXgFormatFiles`) plus **two parsing surfaces, chosen per analysis**: the fast-path metadata readers (`XgFileReader.ReadMatchInfo` / `ReadGameHeaders`, `XgMatchInfo`, `XgIteratorState`) for analyses whose facts live in the file headers, and `XgFileReader.ReadFile` + `XgDecisionIterator.IterateDiagramRequests` for analyses that need per-decision content the headers cannot carry (`DuplicateProblems`). *Amended 2026-08-24 (halheinrich/backgammon#117): this section previously stated that the fast-path metadata readers were the sole parsing surface the analyses use. They are not — they are the surface the header-level analyses use, and the default for a new analysis that can be answered from headers.*
-- **BgDataTypes_Lib** — transitive through ConvertXgToJson_Lib, consumed directly: `BgDecisionData`, `DecisionId`, and `ProblemKey`, the ecosystem's single content-identity derivation. `DuplicateProblems` groups on it and defines no dedup rule of its own.
+- **BgDataTypes_Lib** — transitive through ConvertXgToJson_Lib, consumed directly: `BgDecisionData`, `DecisionId`, and `ProblemKey`, the ecosystem's single content-identity derivation. `DuplicateProblems` groups on it and defines no dedup rule of its own. `MatchScoreDistribution` reads money versus match by the session's kind: the header types' `XgMatchInfo.Terms` and `XgGameInfo.Standing`, composed by `Session.Create` (see Architecture).
+- **BgDataTypes_Lib.TestSupport** — test-only, referenced by `XgAnalytics.Tests`: the producer's record builders (`TestRecords`), the one way the tests build a decision record.
 - **XgFilter_Lib** — project-referenced but not yet consumed by any analysis. Left in place for future filter-driven analyses.
 
 ## Layout
@@ -35,8 +36,11 @@ its runner (see Architecture).
   through `InternalsVisibleTo`. Three roles in one project: the ad-hoc runner
   facts, which are how an analysis is actually invoked; the fixture-agnostic
   corpus tests over the shared `TestData/xg`; and the pinned-fixture
-  discrimination tests over `TestData/FixtureFiles`. Also carries the shared-
-  `TestData` path helper, mirroring ConvertXgToJson_Lib.Tests'.
+  discrimination tests over `TestData/FixtureFiles`. Beside them, the pins of
+  the pure grouping core over records built with `TestRecords`, and of the
+  result records' immutable collections (`AnalysisResultsTests`). Also
+  carries the shared-`TestData` path helper, mirroring
+  ConvertXgToJson_Lib.Tests'.
 
 ## Architecture
 
@@ -58,40 +62,53 @@ side effect the aggregator has, and it is dependency-injected.
 
 **CSV output.** Each analysis writes its result CSV to a hard-coded path under `D:\Users\Hal\Documents\Excel\Backgammon\`. No prompt, no overwrite guard — running twice overwrites.
 
-**Score normalization (MatchScoreDistribution).** Keys are `(MatchLength, Away1, Away2, IsCrawford)` with `Away1 <= Away2` — the pair is swapped so both player perspectives collapse onto one bucket.
+**Money and match by kind (MatchScoreDistribution).** Each game's session is
+composed from the header's terms and the game's standing by BgDataTypes_Lib's
+`Session.Create`, the producer's one rule for pairing the two (it also holds
+them to one kind), and read through the session's exhaustive `Switch`: a
+money game is counted as such (`MoneyGameCount`), and never as a score; a
+match game lands in a score bucket. `Session.Create` takes a seat, and the
+analysis passes player 1's — immaterial, since the key normalizes the pair.
+The CSV leads with a `Session` column (`Money` / `Match`, the kind's name)
+and leaves a money row's match columns empty, as the ecosystem's flat
+decision row does for the other kind's columns.
+
+**Score normalization (MatchScoreDistribution).** Keys are a match game's `(MatchLength, Away1, Away2, IsCrawford)` with `Away1 <= Away2` — the pair is swapped so both player perspectives collapse onto one bucket.
 
 **Duplicate-problem identity (`DuplicateProblems`).** Grouping is over
 `ProblemKey` — the ecosystem's single content-identity derivation, the same key
 BgGame_Lib's `DistinctPositionProblemSetSource` applies for the quiz. This
-analysis invents no identity of its own. Three rules complete it, all ratified
-in halheinrich/backgammon#117:
+analysis invents no identity of its own. Every record has a key
+(`ProblemKey.From` is total; `../SPEC-stats-identity.md` §2, amended
+2026-09-27, halheinrich/backgammon#273), so every decision joins exactly one
+content class; the analysis relies on that rather than guarding against it.
+Two rules complete it, both ratified in halheinrich/backgammon#117:
 
 - **Report-only.** The library never deletes. `RedundantFiles` is a
   recommendation the caller acts on.
 - **Keeper = ordinal-first filename** within each content-equivalence class.
-- **Fail open.** A decision with no derivable key is never merged with anything
-  — not even with another underivable decision — and is never reported
-  redundant: treating underivability as equality would collapse unrelated
-  problems. Under the v3 key (halheinrich/backgammon#120) this is a live
-  population, not a theoretical one: the Jacoby fact is part of the money
-  grammar, so a money record that does not carry it is underivable by design.
 
-**File-level redundancy is a roll-up, not a fourth identity.** A file is
+**File-level redundancy is a roll-up, not an identity of its own.** A file is
 redundant iff it contributed at least one decision and *none* of those
-decisions is essential — essential meaning a class keeper, a problem seen only
-there, or a no-key item. Deleting exactly that set loses no problem. Over a
+decisions is essential — essential meaning a class keeper or a problem seen
+only there. Deleting exactly that set loses no problem. Over a
 one-decision-per-file `.xgp` folder (the halheinrich/backgammon#117 use case)
 this degenerates to "every non-keeper file"; over `.xg` match files it is what
 stops the report recommending the deletion of a match that also carries
-positions found nowhere else. Fail-open composes through it: a file holding a
-no-key decision is never wholly redundant.
+positions found nowhere else.
 
 **Pure grouping seam.** `ComputeDuplicateProblems` owns the scan — enumeration,
 parse, progress, skip counting — and `GroupDuplicateProblems` owns the grouping
 over an `IEnumerable<BgDecisionData>`, with no file access and no logging. The
-split is what makes the fail-open rule testable: a money-record-without-Jacoby
-is synthesized directly, because no corpus is required to contain one and the
-fixture-agnostic `TestData/xg` must never be depended on for it.
+split is what lets the grouping and the file roll-up be pinned over records
+built with `TestRecords` — one problem under two Jacoby rules, a match file
+holding both a redundant copy and a problem found nowhere else — because the
+fixture-agnostic `TestData/xg` must never be depended on for a shape.
+
+**Immutable results.** Every collection a result record holds is an immutable
+copy made where the record is built (`ImmutableCopy`), by construction and by
+`with` alike: the read-only view it hands out is neither the caller's
+collection nor writable through a cast.
 
 ## Public API
 
@@ -130,20 +147,22 @@ internal static class Analyses
 The `Compute*` methods log progress incrementally via the `log` callback and
 return their aggregated result (`PlayerMatchCountResult`,
 `NonStandardStartsResult`, `MatchScoreDistributionResult`,
-`DuplicateProblemsResult` in `AnalysisResults.cs` — immutable records exposing
-read-only views; the score distribution is keyed by the normalized
-`MatchScoreKey`). Those records, and the `PlayerMatchTally` /
+`DuplicateProblemsResult` in `AnalysisResults.cs` — immutable records whose
+collections are immutable copies, handed out as read-only views; the score
+distribution keys match games by the normalized `MatchScoreKey` and counts
+money games apart, by kind). Those records, and the `PlayerMatchTally` /
 `NonStandardStart` / `DuplicateProblemGroup` elements they carry, are
 `internal` for the same reason as `Analyses` — they are these methods' return
 types. `GroupDuplicateProblems` is the one aggregator whose pure core is
-exposed separately, because the fail-open rule cannot be reached from corpus
-input (see Architecture). The `void` wrappers add the CSV write to a hard-coded
-path; their observable output is the `log` stream plus the CSV file.
+exposed separately, so the grouping and the file roll-up can be pinned over
+synthesized records rather than the churning corpus (see Architecture). The
+`void` wrappers add the CSV write to a hard-coded path; their observable
+output is the `log` stream plus the CSV file.
 
 ## Pitfalls
 
 - **Hard-coded CSV output paths** under `D:\Users\Hal\Documents\Excel\Backgammon\`, baked into the `void` wrappers. The directory must already exist — no `Directory.CreateDirectory` call. The wrappers won't run on a non-Hal machine; the `Compute*` aggregators carry no such dependency.
-- **Two test layers, both green-on-any-machine.** The `[Fact]`s named after the analyses are the *ad-hoc runner* — they point at Hal's local input folders and write CSVs, and self-skip (early return) when either the input dir or the CSV output dir is absent. Note the runners do not all share one input: the three header analyses scan `...\hhDb\Xg`, while `DuplicateProblems` scans a BatchAnalyze `Positions\` folder, the folder-cleanup case it exists for. The deterministic CI coverage is separate: corpus shape-invariant tests over the shared `TestData/xg` (guarded for an empty/absent corpus) plus pinned-fixture discrimination tests over `TestData/FixtureFiles`. Never make the corpus tests pin a filename or count — that corpus churns (see `../AGENTS.md` TestData convention).
+- **Two test layers, both green-on-any-machine.** The `[Fact]`s named after the analyses are the *ad-hoc runner* — they point at Hal's local input folders and write CSVs, and self-skip (early return) when either the input dir or the CSV output dir is absent. Note the runners do not all share one input: the three header analyses scan `...\hhDb\Xg`, while `DuplicateProblems` scans a BatchAnalyze `Positions\` folder, the folder-cleanup case it exists for. The deterministic CI coverage is separate: corpus shape-invariant tests over the shared `TestData/xg` (guarded for an empty/absent corpus) plus pinned-fixture discrimination tests over `TestData/FixtureFiles` (the 23-point match, and `MoneyTest.xg` for money read by kind). Never make the corpus tests pin a filename or count — that corpus churns (see `../AGENTS.md` TestData convention).
 - **Silent parse-failure swallow.** `catch { continue; }` hides corrupted-file exceptions entirely — neither logged nor counted. A batch can appear to "complete" while skipping a meaningful fraction of input. `DuplicateProblems` is the exception: it still swallows the exception, but counts the file and logs the total.
 - **CSV overwrite with no guard.** Re-running an analysis clobbers its previous CSV without warning.
 - **Unfiltered iteration.** Despite the `XgFilter_Lib` project reference, no analysis filters — every `.xg`/`.xgp` in `xgDir` is processed.

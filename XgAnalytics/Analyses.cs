@@ -116,6 +116,9 @@ internal static class Analyses
             int gameNum = 0;
             try
             {
+                // ReadGameHeaders states the match header on the state before
+                // it yields a game, and refuses a file without one, so the
+                // match info is present inside this loop.
                 foreach (var game in XgFileReader.ReadGameHeaders(path, state))
                 {
                     gameNum++;
@@ -124,8 +127,8 @@ internal static class Analyses
                         nonStandard.Add(new NonStandardStart(
                             Path.GetFileNameWithoutExtension(path),
                             gameNum,
-                            state.MatchInfo?.Player1 ?? "",
-                            state.MatchInfo?.Player2 ?? ""));
+                            state.MatchInfo!.Player1,
+                            state.MatchInfo.Player2));
                 }
             }
             catch { continue; }
@@ -175,12 +178,15 @@ internal static class Analyses
 
     public static MatchScoreDistributionResult ComputeMatchScoreDistribution(string xgDir, Action<string> log)
     {
-        // Key: (MatchLength, Away1, Away2, IsCrawford) where Away1 <= Away2 (normalized)
+        // Match games only. Key: (MatchLength, Away1, Away2, IsCrawford) where
+        // Away1 <= Away2 (normalized). A money game has no match score; it is
+        // counted by its kind.
         var counts = new Dictionary<MatchScoreKey, int>();
         var sw = Stopwatch.StartNew();
         var state = new XgIteratorState();
 
         int gameCount = 0;
+        int moneyGameCount = 0;
         int matchCount = 0;
         int nextReport = 1;
 
@@ -188,20 +194,32 @@ internal static class Analyses
         {
             try
             {
+                // ReadGameHeaders states the match header on the state before
+                // it yields a game, and refuses a file without one, so the
+                // match info is present inside this loop.
                 foreach (var game in XgFileReader.ReadGameHeaders(path, state))
                 {
                     gameCount++;
 
-                    int ml = state.MatchInfo?.MatchLength ?? 0;
-                    int a1 = game.Away1;
-                    int a2 = game.Away2;
+                    // The game's session: the header's terms and the game's
+                    // standing, composed by the producer's one rule, which
+                    // also holds the two to one kind. Seen from player 1's
+                    // seat because Session.Create needs a seat; which one is
+                    // immaterial, since the key normalizes the pair.
+                    var session = Session.Create(state.MatchInfo!.Terms, game.Standing, Seat.Player1);
+                    session.Switch(
+                        money: _ => moneyGameCount++,
+                        match: match =>
+                        {
+                            int a1 = match.OnRollNeeds;
+                            int a2 = match.OpponentNeeds;
 
-                    // Normalize: lower away score first
-                    if (a1 > a2) (a1, a2) = (a2, a1);
+                            // Normalize: lower away score first
+                            if (a1 > a2) (a1, a2) = (a2, a1);
 
-                    var key = new MatchScoreKey(ml, a1, a2, game.IsCrawfordGame);
-                    counts.TryGetValue(key, out int existing);
-                    counts[key] = existing + 1;
+                            var key = new MatchScoreKey(match.Terms.Length, a1, a2, match.IsCrawford);
+                            counts[key] = counts.GetValueOrDefault(key) + 1;
+                        });
                 }
             }
             catch { continue; }
@@ -223,26 +241,31 @@ internal static class Analyses
         log("");
         log($"Total matches : {matchCount}");
         log($"Total games   : {gameCount}");
+        log($"Money games   : {moneyGameCount}");
         log($"Total time    : {totalSecs:F1}s");
         log($"Avg rate      : {finalRate:F2} matches/sec");
 
-        return new MatchScoreDistributionResult(counts, gameCount, matchCount);
+        return new MatchScoreDistributionResult(counts, moneyGameCount, gameCount, matchCount);
     }
 
     public static void MatchScoreDistribution(string xgDir, Action<string> log)
     {
         var result = ComputeMatchScoreDistribution(xgDir, log);
 
+        // One column per fact, led by the session's kind; a money row leaves
+        // the match's columns empty rather than spelling money as a score.
         string csvPath = @"D:\Users\Hal\Documents\Excel\Backgammon\MatchScoreDistribution.csv";
         using var writer = new StreamWriter(csvPath);
-        writer.WriteLine("MatchLength,Away1,Away2,IsCrawford,Occurs");
+        writer.WriteLine("Session,MatchLength,Away1,Away2,IsCrawford,Occurs");
+        if (result.MoneyGameCount > 0)
+            writer.WriteLine($"{SessionKind.Money},,,,,{result.MoneyGameCount}");
         foreach (var (key, occurs) in result.Counts
             .OrderBy(kv => kv.Key.MatchLength)
             .ThenBy(kv => kv.Key.Away1)
             .ThenBy(kv => kv.Key.Away2)
             .ThenBy(kv => kv.Key.IsCrawford))
         {
-            writer.WriteLine($"{key.MatchLength},{key.Away1},{key.Away2},{(key.IsCrawford ? 1 : 0)},{occurs}");
+            writer.WriteLine($"{SessionKind.Match},{key.MatchLength},{key.Away1},{key.Away2},{(key.IsCrawford ? 1 : 0)},{occurs}");
         }
         log($"CSV written to: {csvPath}");
     }
@@ -327,7 +350,6 @@ internal static class Analyses
         log($"Distinct problems   : {result.DistinctProblemCount}");
         log($"Redundant problems  : {result.RedundantProblemCount} ({redundantPct:F2}%)");
         log($"Duplicate groups    : {result.Groups.Count}");
-        log($"No-key (fail open)  : {result.NoKeyCount}");
         log($"Redundant files     : {result.RedundantFiles.Count}");
         log($"Total time          : {totalSecs:F1}s");
         log($"Avg rate            : {finalRate:F2} files/sec");
@@ -337,24 +359,19 @@ internal static class Analyses
 
     /// <summary>
     /// The pure grouping core of <see cref="ComputeDuplicateProblems"/>: groups
-    /// decisions by derived <see cref="ProblemKey"/> and settles which files are
+    /// decisions by their <see cref="ProblemKey"/> and settles which files are
     /// wholly redundant. No file access, no logging, no ordering assumption
-    /// about the input — the seam that lets the fail-open rule be tested with a
-    /// synthesized record no corpus is required to contain.
+    /// about the input — the seam that lets the grouping and the file roll-up
+    /// be tested over synthesized records, independent of any corpus.
+    ///
+    /// <para>
+    /// Every record has a key (<see cref="ProblemKey.From"/>), so every
+    /// decision joins exactly one content class.
+    /// </para>
     ///
     /// <para>
     /// Streams: only a <see cref="DecisionId"/> per decision is retained, never
     /// the record itself.
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Fail open.</b> A decision whose <see cref="ProblemKey"/> will not
-    /// derive is never merged with anything and never reported redundant,
-    /// matching <c>DistinctPositionProblemSetSource</c> (BgGame_Lib). Under the
-    /// v3 key this is a live population, not a theoretical one: a money record
-    /// that does not carry the Jacoby fact is underivable by design
-    /// (halheinrich/backgammon#120) — guessing "off" is exactly what the no-key
-    /// rung forbids.
     /// </para>
     /// </summary>
     /// <param name="decisions">The decisions to group; enumerated once.</param>
@@ -366,15 +383,14 @@ internal static class Analyses
         var occurrencesByKey = new Dictionary<ProblemKey, List<DecisionId>>();
 
         // Per-file tallies. `essentialByFile` counts the occurrences a file
-        // cannot lose: no-key items (fail open) immediately, class keepers once
-        // every class is closed — which occurrence keeps is unknown until the
-        // whole scan is in, so keepers are settled below. A file is redundant
-        // iff it contributed decisions and none of them is essential.
+        // cannot lose — the class keepers, a problem seen only there being the
+        // keeper of its one-occurrence class. Which occurrence keeps is unknown
+        // until the whole scan is in, so keepers are settled below. A file is
+        // redundant iff it contributed decisions and none of them is essential.
         var occurrencesByFile = new Dictionary<string, int>(StringComparer.Ordinal);
         var essentialByFile = new Dictionary<string, int>(StringComparer.Ordinal);
 
         int problemCount = 0;
-        int noKeyCount = 0;
 
         foreach (var data in decisions)
         {
@@ -382,13 +398,7 @@ internal static class Analyses
             string file = data.Id.Filename;
             occurrencesByFile[file] = occurrencesByFile.GetValueOrDefault(file) + 1;
 
-            if (!ProblemKey.TryDerive(data, out var key))
-            {
-                noKeyCount++;
-                essentialByFile[file] = essentialByFile.GetValueOrDefault(file) + 1;
-                continue;
-            }
-
+            var key = ProblemKey.From(data);
             if (!occurrencesByKey.TryGetValue(key, out var occurrences))
                 occurrencesByKey[key] = occurrences = [];
             occurrences.Add(data.Id);
@@ -420,8 +430,7 @@ internal static class Analyses
             RedundantFiles: redundantFiles,
             FileCount: occurrencesByFile.Count,
             ProblemCount: problemCount,
-            DistinctProblemCount: occurrencesByKey.Count + noKeyCount,
-            NoKeyCount: noKeyCount);
+            DistinctProblemCount: occurrencesByKey.Count);
     }
 
     public static void DuplicateProblems(string xgDir, Action<string> log)

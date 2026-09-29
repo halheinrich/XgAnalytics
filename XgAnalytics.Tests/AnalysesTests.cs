@@ -1,4 +1,5 @@
 ﻿using BgDataTypes_Lib;
+using BgDataTypes_Lib.TestSupport;
 using ConvertXgToJson_Lib;
 using AwesomeAssertions;
 using Xunit.Abstractions;
@@ -120,11 +121,13 @@ public class AnalysesTests(ITestOutputHelper output)
         int fileCount = XgFileReader.EnumerateXgFormatFiles(TestPaths.XgDir).Count();
         var result = Analyses.ComputeMatchScoreDistribution(TestPaths.XgDir, output.WriteLine);
 
-        result.Counts.Values.Sum().Should().Be(result.GameCount,
-            "every scanned game lands in exactly one bucket");
+        (result.Counts.Values.Sum() + result.MoneyGameCount).Should().Be(result.GameCount,
+            "every scanned game is a money game or lands in exactly one match bucket");
         // Vacuous-safe per-element checks (see PlayerMatchCount above).
         result.Counts.Keys.All(k => k.Away1 <= k.Away2).Should().BeTrue(
             "score keys are normalized so the lower away score is first");
+        result.Counts.Keys.All(k => k.MatchLength >= 1 && k.Away1 >= 1).Should().BeTrue(
+            "a bucket is a match's score — money is read by its kind, never as a zero score");
         result.Counts.Values.All(v => v >= 1).Should().BeTrue(
             "a bucket exists only because at least one game fell into it");
         result.MatchCount.Should().BeLessThanOrEqualTo(fileCount,
@@ -180,6 +183,35 @@ public class AnalysesTests(ITestOutputHelper output)
                 "every game lands in exactly one bucket");
             dist.Counts.Keys.Should().OnlyContain(k => k.MatchLength == 23,
                 "the fixture's filename pins a 23-point match");
+            dist.MoneyGameCount.Should().Be(0, "a match has no money game");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public void MatchScoreDistribution_OverMoneyFixture_CountsEveryGameAsMoney()
+    {
+        if (!File.Exists(TestPaths.MoneyTestXg)) return;
+
+        string tempDir = Path.Combine(
+            Path.GetTempPath(), "XgAnalytics.Tests_" + Path.GetRandomFileName());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            File.Copy(TestPaths.MoneyTestXg, Path.Combine(tempDir, Path.GetFileName(TestPaths.MoneyTestXg)));
+
+            // The discrimination check for reading money by kind: a money
+            // session's games have no match score, so none may reach a match
+            // bucket — reading a zero length as money would put them all in one.
+            var dist = Analyses.ComputeMatchScoreDistribution(tempDir, output.WriteLine);
+
+            dist.MatchCount.Should().Be(1, "exactly one file was scanned");
+            dist.GameCount.Should().BeGreaterThan(0, "a real money session contains games");
+            dist.MoneyGameCount.Should().Be(dist.GameCount, "every game of a money session is a money game");
+            dist.Counts.Should().BeEmpty("a money game has no match score to bucket");
         }
         finally
         {
@@ -190,13 +222,13 @@ public class AnalysesTests(ITestOutputHelper output)
     // -------------------------------------------------------------------------
     //  DuplicateProblems (halheinrich/backgammon#117)
     //
-    //  Layer 1 corpus invariants + Layer 2 discrimination, as above, plus a
-    //  synthesized-record pin for the fail-open rule. The fail-open case is
-    //  deliberately not sourced from `TestData/xg`: the corpus is
-    //  fixture-agnostic and may be empty, and the in-tree producer stamps the
-    //  Jacoby fact on every money record it emits — so the no-key rung would
-    //  never fire from real data here even though it is a live population for
-    //  records from laxer producers (halheinrich/backgammon#120).
+    //  Layer 1 corpus invariants + Layer 2 discrimination, as above, plus
+    //  pins of the pure grouping core over records built with the producer's
+    //  TestRecords. Those are deliberately not sourced from `TestData/xg`: the
+    //  corpus is fixture-agnostic and may be empty, and the shapes they pin —
+    //  one problem under two session rules, a multi-decision file holding both
+    //  a redundant copy and a problem found nowhere else — are stated, not
+    //  hoped for.
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -209,8 +241,6 @@ public class AnalysesTests(ITestOutputHelper output)
 
         result.FileCount.Should().BeLessThanOrEqualTo(fileCount,
             "only enumerated files can contribute decisions");
-        result.NoKeyCount.Should().BeLessThanOrEqualTo(result.ProblemCount,
-            "no-key items are a subset of the decisions scanned");
         result.DistinctProblemCount.Should().BeLessThanOrEqualTo(result.ProblemCount,
             "collapsing copies can only reduce the distinct count");
         result.RedundantProblemCount.Should().Be(
@@ -264,9 +294,6 @@ public class AnalysesTests(ITestOutputHelper output)
             var result = Analyses.ComputeDuplicateProblems(tempDir, output.WriteLine);
 
             result.FileCount.Should().Be(2, "both copies carry decisions");
-            result.NoKeyCount.Should().Be(0,
-                "every decision in this pinned fixture derives a key — the exact "
-                + "redundant-file claim below assumes the fail-open rung never fires");
             result.Groups.Should().NotBeEmpty("identical copies duplicate every problem");
             result.Groups.Should().OnlyContain(g => g.Keeper.Filename == "a.xg",
                 "the ordinal-first filename keeps");
@@ -282,59 +309,62 @@ public class AnalysesTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void GroupDuplicateProblems_MoneyRecordWithoutJacoby_FailsOpen_AndIsNeverRedundant()
+    public void GroupDuplicateProblems_GroupsByProblemKey_SoOneBoardUnderTwoJacobyRulesIsTwoProblems()
     {
-        // Control — the pair is otherwise identical, so with the Jacoby fact
-        // present it derives one key, collapses, and "b.xgp" is redundant.
-        // Without this, the fail-open assertions below could pass for the wrong
-        // reason (records that simply never grouped).
-        var stamped = Analyses.GroupDuplicateProblems(
-            [MoneyCubeRecord("a.xgp", isJacoby: true), MoneyCubeRecord("b.xgp", isJacoby: true)]);
+        // Control — the pair is identical, so it derives one key, collapses,
+        // and "b.xgp" is redundant. Without this, the split below could pass
+        // for the wrong reason (records that simply never grouped).
+        var same = Analyses.GroupDuplicateProblems(
+            [MoneyCube(new XgpDecisionId("a.xgp"), isJacoby: true),
+             MoneyCube(new XgpDecisionId("b.xgp"), isJacoby: true)]);
 
-        stamped.NoKeyCount.Should().Be(0, "a stamped money record derives a key");
-        stamped.Groups.Should().ContainSingle("the two records are the same problem");
-        stamped.DistinctProblemCount.Should().Be(1);
-        stamped.RedundantFiles.Should().Equal(["b.xgp"], "the ordinal-first filename keeps");
+        same.Groups.Should().ContainSingle("the two records are the same problem");
+        same.DistinctProblemCount.Should().Be(1);
+        same.RedundantFiles.Should().Equal(["b.xgp"], "the ordinal-first filename keeps");
 
-        // Fail open — the same pair with the money grammar's Jacoby fact absent
-        // has no derivable key. Underivability is not equality: neither copy
-        // forms a class, and neither is ever reported redundant.
-        var unstamped = Analyses.GroupDuplicateProblems(
-            [MoneyCubeRecord("a.xgp", isJacoby: null), MoneyCubeRecord("b.xgp", isJacoby: null)]);
+        // The same board and cube under the other Jacoby rule is another
+        // problem: the rule is part of a money key, so the grouping — which
+        // is the key's, with no rule of its own — keeps the two apart.
+        var split = Analyses.GroupDuplicateProblems(
+            [MoneyCube(new XgpDecisionId("a.xgp"), isJacoby: true),
+             MoneyCube(new XgpDecisionId("b.xgp"), isJacoby: false)]);
 
-        unstamped.NoKeyCount.Should().Be(2, "a money record without Jacoby is the no-key rung");
-        unstamped.Groups.Should().BeEmpty("no-key items never form a class");
-        unstamped.RedundantFiles.Should().BeEmpty(
-            "an item with no derivable key is never reported redundant");
-        unstamped.DistinctProblemCount.Should().Be(2,
-            "each no-key item counts as its own distinct problem");
-        unstamped.RedundantProblemCount.Should().Be(0);
+        split.Groups.Should().BeEmpty("the Jacoby rule separates the two problems");
+        split.DistinctProblemCount.Should().Be(2);
+        split.RedundantFiles.Should().BeEmpty("each file holds a problem found nowhere else");
+        split.RedundantProblemCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void GroupDuplicateProblems_MultiDecisionFile_IsRedundantOnlyWhenEveryProblemSurvivesElsewhere()
+    {
+        // Three match files share one cube problem; "b.xg" also holds a
+        // checker play found nowhere else. Scanned in reverse ordinal order,
+        // since the core assumes no input order.
+        var shared = (string file) => MoneyCube(
+            new XgDecisionId(file, Game: 1, MoveNumber: 1, IsCube: true), isJacoby: true);
+        var onlyInB = TestRecords.CheckerPlay(
+            id: new XgDecisionId("b.xg", Game: 1, MoveNumber: 2, IsCube: false));
+
+        var result = Analyses.GroupDuplicateProblems(
+            [shared("c.xg"), shared("b.xg"), onlyInB, shared("a.xg")]);
+
+        result.ProblemCount.Should().Be(4);
+        result.DistinctProblemCount.Should().Be(2, "one shared problem and one found only in b.xg");
+        result.RedundantProblemCount.Should().Be(2, "the shared problem's copies in b.xg and c.xg");
+        result.Groups.Should().ContainSingle("only the cube problem is duplicated")
+            .Which.Occurrences.Select(id => id.Filename).Should().Equal(
+                ["a.xg", "b.xg", "c.xg"], "occurrences run ordinal-first, so a.xg keeps");
+        result.RedundantFiles.Should().Equal(["c.xg"],
+            "b.xg's cube copy is redundant, but its checker play survives nowhere else");
     }
 
     /// <summary>
-    /// A money cube decision from the standard opening position, differing only
-    /// in whether the Jacoby fact is stamped. Centered cube, because that is
-    /// exactly where Jacoby is answer-changing (halheinrich/backgammon#120).
+    /// A money cube decision at the standard start, the cube centred — where
+    /// the Jacoby rule is answer-changing (halheinrich/backgammon#120) —
+    /// differing only in its identifier and the session's Jacoby rule.
     /// </summary>
-    private static BgDecisionData MoneyCubeRecord(string filename, bool? isJacoby) => new()
-    {
-        Id = new XgpDecisionId(filename),
-        Position = new PositionData
-        {
-            Mop = StandardStartBoard,
-            OnRollNeeds = 0,          // 0/0 away = money
-            OpponentNeeds = 0,
-            CubeSize = 1,
-            CubeOwner = CubeOwner.Centered,
-            IsJacoby = isJacoby,
-        },
-        Decision = new DecisionData { IsCube = true },
-    };
-
-    /// <summary>
-    /// On-roll-relative standard opening position: index 0 is the opponent's
-    /// bar, 1–24 the points, 25 the on-roll bar. Fifteen checkers a side.
-    /// </summary>
-    private static int[] StandardStartBoard =>
-        [0, -2, 0, 0, 0, 0, 5, 0, 3, 0, 0, 0, -5, 5, 0, 0, 0, -3, 0, -5, 0, 0, 0, 0, 2, 0];
+    private static CubeDecision MoneyCube(DecisionId id, bool isJacoby) => TestRecords.Cube(
+        id: id,
+        position: TestRecords.Position(session: TestRecords.MoneySession(isJacoby: isJacoby)));
 }

@@ -7,9 +7,14 @@ namespace XgAnalytics;
 //
 //  These immutable records are the return values of the `Analyses.Compute*`
 //  aggregators — the pure computation extracted out of the side-effecting
-//  `void` analysis methods. They expose the aggregated data as read-only views
-//  so callers (the CSV-writing wrappers, and tests asserting shape invariants)
-//  can consume the result without re-running the scan or touching the corpus.
+//  `void` analysis methods. Callers (the CSV-writing wrappers, and tests
+//  asserting shape invariants) consume the result without re-running the scan
+//  or touching the corpus.
+//
+//  Every collection a record holds is an immutable copy made where the record
+//  is built (`ImmutableCopy`), by construction and by `with` alike: neither
+//  the collection the caller passed nor a cast of the read-only view handed
+//  out can change a record afterwards.
 //
 //  All `internal`, matching `Analyses` — they are its return types, and this
 //  library has no consumer outside its own test project (which sees them via
@@ -24,6 +29,19 @@ namespace XgAnalytics;
 /// <param name="MatchIds">Distinct match IDs this player appears in; always non-empty.</param>
 internal sealed record PlayerMatchTally(string Player, IReadOnlyCollection<string> MatchIds)
 {
+    private readonly IReadOnlyCollection<string> _matchIds = ImmutableCopy.Of(MatchIds, nameof(MatchIds));
+
+    /// <summary>
+    /// Distinct match IDs this player appears in; an immutable copy, so neither
+    /// the caller's collection nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyCollection<string> MatchIds
+    {
+        get => _matchIds;
+        init => _matchIds = ImmutableCopy.Of(value, nameof(MatchIds));
+    }
+
     /// <summary>Number of distinct matches this player appears in (≥ 1).</summary>
     public int MatchCount => MatchIds.Count;
 }
@@ -42,15 +60,29 @@ internal sealed record PlayerMatchTally(string Player, IReadOnlyCollection<strin
 /// </param>
 internal sealed record PlayerMatchCountResult(
     IReadOnlyList<PlayerMatchTally> Players,
-    int DistinctMatchCount);
+    int DistinctMatchCount)
+{
+    private readonly IReadOnlyList<PlayerMatchTally> _players = ImmutableCopy.Of(Players, nameof(Players));
+
+    /// <summary>
+    /// Players ordered by descending match count, then name; an immutable copy,
+    /// so neither the caller's list nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyList<PlayerMatchTally> Players
+    {
+        get => _players;
+        init => _players = ImmutableCopy.Of(value, nameof(Players));
+    }
+}
 
 /// <summary>
 /// One game that did not start from the standard backgammon opening position.
 /// </summary>
 /// <param name="Match">Match ID (file name without extension); never blank.</param>
 /// <param name="Game">1-based game number within its match (≥ 1).</param>
-/// <param name="Player1">Player 1 name, or empty if unavailable.</param>
-/// <param name="Player2">Player 2 name, or empty if unavailable.</param>
+/// <param name="Player1">Player 1 name, as the match header records it (possibly empty).</param>
+/// <param name="Player2">Player 2 name, as the match header records it (possibly empty).</param>
 internal sealed record NonStandardStart(string Match, int Game, string Player1, string Player2);
 
 /// <summary>
@@ -66,33 +98,68 @@ internal sealed record NonStandardStart(string Match, int Game, string Player1, 
 internal sealed record NonStandardStartsResult(
     IReadOnlyList<NonStandardStart> NonStandard,
     int GameCount,
-    int MatchCount);
+    int MatchCount)
+{
+    private readonly IReadOnlyList<NonStandardStart> _nonStandard = ImmutableCopy.Of(NonStandard, nameof(NonStandard));
+
+    /// <summary>
+    /// Flagged games; an immutable copy, so neither the caller's list nor a
+    /// cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyList<NonStandardStart> NonStandard
+    {
+        get => _nonStandard;
+        init => _nonStandard = ImmutableCopy.Of(value, nameof(NonStandard));
+    }
+}
 
 /// <summary>
-/// Normalized match-score bucket: the away-point scores at the start of a game,
-/// with <see cref="Away1"/> ≤ <see cref="Away2"/> so both player perspectives
-/// collapse onto one key.
+/// Normalized match-score bucket: a match game's away-point scores as it
+/// begins, with <see cref="Away1"/> ≤ <see cref="Away2"/> so both player
+/// perspectives collapse onto one key. A match's alone — a money game has no
+/// match score, and is counted by its kind instead
+/// (<see cref="MatchScoreDistributionResult.MoneyGameCount"/>).
 /// </summary>
-/// <param name="MatchLength">Match length in points (0 = money session).</param>
-/// <param name="Away1">Lower away score (points still needed); ≤ <see cref="Away2"/>.</param>
-/// <param name="Away2">Higher away score (points still needed).</param>
-/// <param name="IsCrawford">Whether the Crawford rule applied to the game.</param>
+/// <param name="MatchLength">The match's length in points, its terms' (≥ 1).</param>
+/// <param name="Away1">Lower away score (points still needed, ≥ 1); ≤ <see cref="Away2"/>.</param>
+/// <param name="Away2">Higher away score (points still needed); ≤ <see cref="MatchLength"/>.</param>
+/// <param name="IsCrawford">Whether the game is the Crawford game.</param>
 internal readonly record struct MatchScoreKey(int MatchLength, int Away1, int Away2, bool IsCrawford);
 
 /// <summary>
 /// Result of <see cref="Analyses.ComputeMatchScoreDistribution"/>: how many
-/// games fell into each normalized score bucket, plus the totals scanned.
+/// match games fell into each normalized score bucket, how many games were
+/// played for money, plus the totals scanned. Money and match are told apart
+/// by the session's kind, never by a stand-in score.
 /// </summary>
 /// <param name="Counts">
-/// Occurrence count per <see cref="MatchScoreKey"/>. Every value is ≥ 1 and the
-/// values sum to <see cref="GameCount"/>.
+/// Occurrence count per <see cref="MatchScoreKey"/>, over match games only.
+/// Every value is ≥ 1, and the values sum to <see cref="GameCount"/> less
+/// <see cref="MoneyGameCount"/>.
 /// </param>
-/// <param name="GameCount">Total games scanned across all matches.</param>
-/// <param name="MatchCount">Total matches (files) scanned.</param>
+/// <param name="MoneyGameCount">Games of money sessions, which have no match score.</param>
+/// <param name="GameCount">Total games scanned across all files, money and match.</param>
+/// <param name="MatchCount">Total files scanned — each a match or a money session.</param>
 internal sealed record MatchScoreDistributionResult(
     IReadOnlyDictionary<MatchScoreKey, int> Counts,
+    int MoneyGameCount,
     int GameCount,
-    int MatchCount);
+    int MatchCount)
+{
+    private readonly IReadOnlyDictionary<MatchScoreKey, int> _counts = ImmutableCopy.OfDictionary(Counts, nameof(Counts));
+
+    /// <summary>
+    /// Occurrence count per match-score bucket; an immutable copy, so neither
+    /// the caller's dictionary nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyDictionary<MatchScoreKey, int> Counts
+    {
+        get => _counts;
+        init => _counts = ImmutableCopy.OfDictionary(value, nameof(Counts));
+    }
+}
 
 
 /// <summary>
@@ -110,6 +177,19 @@ internal sealed record MatchScoreDistributionResult(
 /// </param>
 internal sealed record DuplicateProblemGroup(ProblemKey Key, IReadOnlyList<DecisionId> Occurrences)
 {
+    private readonly IReadOnlyList<DecisionId> _occurrences = ImmutableCopy.Of(Occurrences, nameof(Occurrences));
+
+    /// <summary>
+    /// The decisions that derived <see cref="Key"/>, keeper first; an immutable
+    /// copy, so neither the caller's list nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyList<DecisionId> Occurrences
+    {
+        get => _occurrences;
+        init => _occurrences = ImmutableCopy.Of(value, nameof(Occurrences));
+    }
+
     /// <summary>
     /// The surviving occurrence — the ordinal-first filename in the class, per
     /// the ratified keeper rule. Report-only: nothing here deletes anything.
@@ -129,18 +209,6 @@ internal sealed record DuplicateProblemGroup(ProblemKey Key, IReadOnlyList<Decis
 /// <b>Report-only.</b> Nothing here deletes; <see cref="RedundantFiles"/> is a
 /// recommendation the caller acts on (halheinrich/backgammon#117).
 /// </para>
-///
-/// <para>
-/// <b>Fail-open on an underivable key.</b> A decision with no derivable
-/// <see cref="ProblemKey"/> (the no-key rung — see
-/// <see cref="ProblemKey.TryDerive"/>) forms no class and is never reported
-/// redundant, even when several such decisions are otherwise identical:
-/// treating underivability as equality would collapse unrelated problems.
-/// It counts toward both <see cref="ProblemCount"/> and
-/// <see cref="NoKeyCount"/>, and as its own entry in
-/// <see cref="DistinctProblemCount"/>. Consequently a file holding one keeps
-/// that file out of <see cref="RedundantFiles"/>.
-/// </para>
 /// </summary>
 /// <param name="Groups">
 /// The duplicate classes, ordered by <see cref="ProblemKey"/>. Empty when
@@ -150,32 +218,51 @@ internal sealed record DuplicateProblemGroup(ProblemKey Key, IReadOnlyList<Decis
 /// Bare filenames (relative to the scanned directory — the scan is one flat
 /// directory, so names are unique within it), ordinal-ascending, of files
 /// every one of whose problems survives elsewhere: the file contributed at
-/// least one decision, and not one of its decisions is either a class keeper,
-/// a problem seen only there, or a no-key item. Deleting exactly this set
-/// loses no problem.
+/// least one decision, and not one of its decisions is either a class keeper
+/// or a problem seen only there. Deleting exactly this set loses no problem.
 /// </param>
 /// <param name="FileCount">
 /// Distinct files that contributed at least one decision. Bounded above by the
 /// number of XG-format files enumerated; files that were unreadable or carried
 /// no analysed decision are excluded (the scan logs those totals).
 /// </param>
-/// <param name="ProblemCount">Total decisions scanned, no-key items included.</param>
+/// <param name="ProblemCount">Total decisions scanned.</param>
 /// <param name="DistinctProblemCount">
-/// Distinct problems: one per derived <see cref="ProblemKey"/>, plus one per
-/// no-key item (fail-open — no-key items never merge, with each other or with
-/// anything else). Equals <see cref="ProblemCount"/> when nothing collapsed.
-/// </param>
-/// <param name="NoKeyCount">
-/// Decisions with no derivable key; ≤ <see cref="ProblemCount"/>.
+/// Distinct problems: one per <see cref="ProblemKey"/> the scanned decisions
+/// derived. Equals <see cref="ProblemCount"/> when nothing collapsed.
 /// </param>
 internal sealed record DuplicateProblemsResult(
     IReadOnlyList<DuplicateProblemGroup> Groups,
     IReadOnlyList<string> RedundantFiles,
     int FileCount,
     int ProblemCount,
-    int DistinctProblemCount,
-    int NoKeyCount)
+    int DistinctProblemCount)
 {
+    private readonly IReadOnlyList<DuplicateProblemGroup> _groups = ImmutableCopy.Of(Groups, nameof(Groups));
+    private readonly IReadOnlyList<string> _redundantFiles = ImmutableCopy.Of(RedundantFiles, nameof(RedundantFiles));
+
+    /// <summary>
+    /// The duplicate classes, ordered by <see cref="ProblemKey"/>; an immutable
+    /// copy, so neither the caller's list nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyList<DuplicateProblemGroup> Groups
+    {
+        get => _groups;
+        init => _groups = ImmutableCopy.Of(value, nameof(Groups));
+    }
+
+    /// <summary>
+    /// The wholly redundant files, ordinal-ascending; an immutable copy, so
+    /// neither the caller's list nor a cast can change it.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">Thrown on init when the value is <see langword="null"/>.</exception>
+    public IReadOnlyList<string> RedundantFiles
+    {
+        get => _redundantFiles;
+        init => _redundantFiles = ImmutableCopy.Of(value, nameof(RedundantFiles));
+    }
+
     /// <summary>
     /// Redundant problem occurrences — the copies beyond the first in every
     /// class. Equals <see cref="ProblemCount"/> − <see cref="DistinctProblemCount"/>

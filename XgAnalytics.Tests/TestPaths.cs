@@ -33,4 +33,11 @@ internal static class TestPaths
     public static string AchimMuellerSeqXg =>
         Path.Combine(FixtureFilesDir,
             "Achim Mueller (8.36) - Mario Sequeira (7.13) 23pt Monte Carlo WC 2008 SF.xg");
+
+    /// <summary>
+    /// A money session (Jacoby off), as its filename says and as
+    /// ConvertXgToJson_Lib's own tests pin it — the fixture that shows an
+    /// analysis reading money by the session's kind. Append-only fixture.
+    /// </summary>
+    public static string MoneyTestXg => Path.Combine(FixtureFilesDir, "MoneyTest.xg");
 }
