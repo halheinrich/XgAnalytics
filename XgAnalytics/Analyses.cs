@@ -202,22 +202,20 @@ internal static class Analyses
                     gameCount++;
 
                     // The game's session: the header's terms and the game's
-                    // standing, composed by the producer's one rule, which
-                    // also holds the two to one kind. Seen from player 1's
-                    // seat because Session.Create needs a seat; which one is
-                    // immaterial, since the key normalizes the pair.
-                    var session = Session.Create(state.MatchInfo!.Terms, game.Standing, Seat.Player1);
+                    // standing, paired by the producer's one rule, which also
+                    // holds the two to one kind.
+                    var session = GameSession.Create(state.MatchInfo!.Terms, game.Standing);
                     session.Switch(
                         money: _ => moneyGameCount++,
                         match: match =>
                         {
-                            int a1 = match.OnRollNeeds;
-                            int a2 = match.OpponentNeeds;
+                            int a1 = match.Standing.Away1;
+                            int a2 = match.Standing.Away2;
 
                             // Normalize: lower away score first
                             if (a1 > a2) (a1, a2) = (a2, a1);
 
-                            var key = new MatchScoreKey(match.Terms.Length, a1, a2, match.IsCrawford);
+                            var key = new MatchScoreKey(match.Terms.Length, a1, a2, match.Standing.IsCrawford);
                             counts[key] = counts.GetValueOrDefault(key) + 1;
                         });
                 }

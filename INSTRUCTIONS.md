@@ -19,7 +19,7 @@ https://github.com/halheinrich/XgAnalytics — branch `main`.
 ## Depends on
 
 - **ConvertXgToJson_Lib** — file discovery (`XgFileReader.EnumerateXgFormatFiles`) plus **two parsing surfaces, chosen per analysis**: the fast-path metadata readers (`XgFileReader.ReadMatchInfo` / `ReadGameHeaders`, `XgMatchInfo`, `XgIteratorState`) for analyses whose facts live in the file headers, and `XgFileReader.ReadFile` + `XgDecisionIterator.IterateDiagramRequests` for analyses that need per-decision content the headers cannot carry (`DuplicateProblems`). *Amended 2026-08-24 (halheinrich/backgammon#117): this section previously stated that the fast-path metadata readers were the sole parsing surface the analyses use. They are not — they are the surface the header-level analyses use, and the default for a new analysis that can be answered from headers.*
-- **BgDataTypes_Lib** — transitive through ConvertXgToJson_Lib, consumed directly: `BgDecisionData`, `DecisionId`, and `ProblemKey`, the ecosystem's single content-identity derivation. `DuplicateProblems` groups on it and defines no dedup rule of its own. `MatchScoreDistribution` reads money versus match by the session's kind: the header types' `XgMatchInfo.Terms` and `XgGameInfo.Standing`, composed by `Session.Create` (see Architecture).
+- **BgDataTypes_Lib** — transitive through ConvertXgToJson_Lib, consumed directly: `BgDecisionData`, `DecisionId`, and `ProblemKey`, the ecosystem's single content-identity derivation. `DuplicateProblems` groups on it and defines no dedup rule of its own. `MatchScoreDistribution` reads money versus match by the session's kind: the header types' `XgMatchInfo.Terms` and `XgGameInfo.Standing`, paired by `GameSession.Create` (see Architecture).
 - **BgDataTypes_Lib.TestSupport** — test-only, referenced by `XgAnalytics.Tests`: the producer's record builders (`TestRecords`), the one way the tests build a decision record.
 - **XgFilter_Lib** — project-referenced but not yet consumed by any analysis. Left in place for future filter-driven analyses.
 
@@ -63,13 +63,12 @@ side effect the aggregator has, and it is dependency-injected.
 **CSV output.** Each analysis writes its result CSV to a hard-coded path under `D:\Users\Hal\Documents\Excel\Backgammon\`. No prompt, no overwrite guard — running twice overwrites.
 
 **Money and match by kind (MatchScoreDistribution).** Each game's session is
-composed from the header's terms and the game's standing by BgDataTypes_Lib's
-`Session.Create`, the producer's one rule for pairing the two (it also holds
-them to one kind), and read through the session's exhaustive `Switch`: a
-money game is counted as such (`MoneyGameCount`), and never as a score; a
-match game lands in a score bucket. `Session.Create` takes a seat, and the
-analysis passes player 1's — immaterial, since the key normalizes the pair.
-The CSV leads with a `Session` column (`Money` / `Match`, the kind's name)
+paired from the header's terms and the game's standing by BgDataTypes_Lib's
+`GameSession.Create`, the producer's one rule for pairing the two (it also
+holds them to one kind), and read through the game session's exhaustive
+`Switch`: a money game is counted as such (`MoneyGameCount`), and never as a
+score; a match game lands in a score bucket, from its terms' length and its
+standing's away scores and Crawford flag. The CSV leads with a `Session` column (`Money` / `Match`, the kind's name)
 and leaves a money row's match columns empty, as the ecosystem's flat
 decision row does for the other kind's columns.
 
