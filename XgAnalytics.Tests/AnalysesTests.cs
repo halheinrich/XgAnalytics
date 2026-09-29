@@ -1,4 +1,4 @@
-﻿using BgDataTypes_Lib;
+using BgDataTypes_Lib;
 using BgDataTypes_Lib.TestSupport;
 using ConvertXgToJson_Lib;
 using AwesomeAssertions;

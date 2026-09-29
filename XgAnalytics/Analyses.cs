@@ -1,4 +1,4 @@
-﻿using BgDataTypes_Lib;
+using BgDataTypes_Lib;
 using ConvertXgToJson_Lib;
 using ConvertXgToJson_Lib.Models;
 using System.Diagnostics;
