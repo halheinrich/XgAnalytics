@@ -58,7 +58,12 @@ over an optional input directory, logging progress to the console:
   first profile, `Usage`, passes no arguments, so a start with no report
   picked prints the list of reports and runs nothing; one profile per report
   follows it. `LaunchProfilesTests` reads that file (copied to the test
-  output) and fails when the profiles and `Reports.All` disagree.
+  output) and fails when the profiles and `Reports.All` disagree: `Usage`
+  must be first, with no arguments, and each report keeps exactly one
+  profile under its name, whose first argument is that report. Any profile
+  may add a folder after the report name, and a report may have extra
+  profiles under any name; only each profile's first argument is checked,
+  and it must name a report.
 - **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`.
   The arguments after `--` replace the launch profile's; a bare `dotnet run`
   with none falls back to the first profile, `Usage`. Pass
