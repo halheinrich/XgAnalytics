@@ -40,8 +40,9 @@ and their tests (see Architecture).
   shared `TestData/xg`; the pinned-fixture discrimination tests over
   `TestData/FixtureFiles`; the pins of the pure grouping core over records
   built with `TestRecords`, of the result records' immutable collections
-  (`AnalysisResultsTests`), and of the entry point's dispatch
-  (`ReportCommandTests`). Also carries the shared-`TestData` path helper,
+  (`AnalysisResultsTests`), of the entry point's dispatch
+  (`ReportCommandTests`), and of its launch profiles against `Reports.All`
+  (`LaunchProfilesTests`). Also carries the shared-`TestData` path helper,
   mirroring ConvertXgToJson_Lib.Tests'.
 
 ## Architecture
@@ -56,7 +57,8 @@ over an optional input directory, logging progress to the console:
   and press Ctrl+F5. Use the Release configuration for a full-corpus run. The
   first profile, `Usage`, passes no arguments, so a start with no report
   picked prints the list of reports and runs nothing; one profile per report
-  follows it.
+  follows it. `LaunchProfilesTests` reads that file (copied to the test
+  output) and fails when the profiles and `Reports.All` disagree.
 - **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`.
   The arguments after `--` replace the launch profile's; a bare `dotnet run`
   with none falls back to the first profile, `Usage`. Pass

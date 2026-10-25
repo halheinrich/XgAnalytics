@@ -24,6 +24,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The launch profiles Visual Studio uses, copied beside the tests (under
+         a name the test host will not mistake for its own) so
+         LaunchProfilesTests reads the real file. -->
+    <None Include="..\XgAnalytics\Properties\launchSettings.json" Link="XgAnalytics.launchSettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
   </ItemGroup>
 
