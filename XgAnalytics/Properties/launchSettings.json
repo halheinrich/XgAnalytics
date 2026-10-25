@@ -1,5 +1,8 @@
 {
   "profiles": {
+    "Usage": {
+      "commandName": "Project"
+    },
     "PlayerMatchCount": {
       "commandName": "Project",
       "commandLineArgs": "PlayerMatchCount"

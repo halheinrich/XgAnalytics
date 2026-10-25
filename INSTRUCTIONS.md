@@ -52,14 +52,16 @@ and their tests (see Architecture).
 over an optional input directory, logging progress to the console:
 
 - **Visual Studio:** set `XgAnalytics` as the startup project, pick the report
-  in the toolbar's start-profile dropdown (one profile per report,
-  `Properties/launchSettings.json`), and press Ctrl+F5. Use the Release
-  configuration for a full-corpus run.
+  in the toolbar's start-profile dropdown (`Properties/launchSettings.json`),
+  and press Ctrl+F5. Use the Release configuration for a full-corpus run. The
+  first profile, `Usage`, passes no arguments, so a start with no report
+  picked prints the list of reports and runs nothing; one profile per report
+  follows it.
 - **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`.
-  The arguments after `--` replace the launch profile's, but a bare
-  `dotnet run` with none falls back to the first profile and *runs*
-  `PlayerMatchCount`, overwriting its CSV; add `--no-launch-profile` to see
-  the usage instead.
+  The arguments after `--` replace the launch profile's; a bare `dotnet run`
+  with none falls back to the first profile, `Usage`. Pass
+  `--no-launch-profile` anyway when only the usage is wanted: it does not
+  depend on the profiles' order.
 
 Without `[dir]`, the three header analyses scan Hal's match database
 (`Reports.XgDir`) and `DuplicateProblems` a BatchAnalyze positions folder
