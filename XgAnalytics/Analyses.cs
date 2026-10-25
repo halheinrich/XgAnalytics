@@ -6,9 +6,10 @@ using System.Diagnostics;
 namespace XgAnalytics;
 
 /// <remarks>
-/// Kept <c>internal</c>: this library has no external consumer and no exe — its
-/// test project is both the sole caller and the ad-hoc runner, and reaches these
-/// members through the <c>InternalsVisibleTo</c> in <c>XgAnalytics.csproj</c>.
+/// Kept <c>internal</c>: this assembly has no external consumer — its callers are
+/// its own command entry point (<see cref="ReportCommand"/>, which runs the
+/// <c>void</c> wrappers) and its test project, which reaches these members
+/// through the <c>InternalsVisibleTo</c> in <c>XgAnalytics.csproj</c>.
 /// The result records in <c>AnalysisResults.cs</c> are likewise <c>internal</c>,
 /// since they appear in these signatures. Should a real consumer ever appear,
 /// widen deliberately as a designed public surface rather than by default.

@@ -6,7 +6,7 @@
 
 ## Stack
 
-C# / .NET 10 class library + xUnit test project. Visual Studio 2026, Windows.
+C# / .NET 10 console app (one command per report) + xUnit test project. Visual Studio 2026, Windows.
 
 ## Solution
 
@@ -25,26 +25,53 @@ https://github.com/halheinrich/XgAnalytics — branch `main`.
 
 ## Layout
 
-Two projects in one solution: a class library and the test project that is also
-its runner (see Architecture).
+Two projects in one solution: the analyses with the command that runs them,
+and their tests (see Architecture).
 
-- **`XgAnalytics/`** — the library. Nothing in it is `public`, and there is no
-  `Program.cs`. Two areas: the `Analyses` static class, which holds every
-  analysis as a `Compute*` aggregator plus a `void` CSV-writing sibling, and
-  the immutable result records those aggregators return.
+- **`XgAnalytics/`** — the analyses and their command entry point. Nothing in
+  it is `public`. Three areas: the `Analyses` static class, which holds every
+  analysis as a `Compute*` aggregator plus a `void` CSV-writing sibling; the
+  immutable result records those aggregators return; and the entry point —
+  `Program.cs`, the `ReportCommand` dispatch, the `Reports` table of names and
+  default input directories, and one launch profile per report in
+  `Properties/launchSettings.json`.
 - **`XgAnalytics.Tests/`** — xUnit + AwesomeAssertions, reaching the library
-  through `InternalsVisibleTo`. Three roles in one project: the ad-hoc runner
-  facts, which are how an analysis is actually invoked; the fixture-agnostic
-  corpus tests over the shared `TestData/xg`; and the pinned-fixture
-  discrimination tests over `TestData/FixtureFiles`. Beside them, the pins of
-  the pure grouping core over records built with `TestRecords`, and of the
-  result records' immutable collections (`AnalysisResultsTests`). Also
-  carries the shared-`TestData` path helper, mirroring
-  ConvertXgToJson_Lib.Tests'.
+  through `InternalsVisibleTo`: the fixture-agnostic corpus tests over the
+  shared `TestData/xg`; the pinned-fixture discrimination tests over
+  `TestData/FixtureFiles`; the pins of the pure grouping core over records
+  built with `TestRecords`, of the result records' immutable collections
+  (`AnalysisResultsTests`), and of the entry point's dispatch
+  (`ReportCommandTests`). Also carries the shared-`TestData` path helper,
+  mirroring ConvertXgToJson_Lib.Tests'.
 
 ## Architecture
 
-**Class library, not a console app.** There is no `Program.cs` and no `Main`. The entry points are xUnit `[Fact]` methods in `XgAnalytics.Tests`, which call static methods on `Analyses` and pass `ITestOutputHelper.WriteLine` as the log sink. Running an analysis means running its test. This is intentional — it gives progress output in the Test Explorer, lets Visual Studio be the runner, and avoids a separate console host.
+**Run a report as a command, not a test.** `XgAnalytics` is an exe whose
+`Program` runs one named report — `PlayerMatchCount`, `NonStandardStarts`,
+`MatchScoreDistribution` or `DuplicateProblems`, the `void` wrappers' names —
+over an optional input directory, logging progress to the console:
+
+- **Visual Studio:** set `XgAnalytics` as the startup project, pick the report
+  in the toolbar's start-profile dropdown (one profile per report,
+  `Properties/launchSettings.json`), and press Ctrl+F5. Use the Release
+  configuration for a full-corpus run.
+- **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`.
+  The arguments after `--` replace the launch profile's, but a bare
+  `dotnet run` with none falls back to the first profile and *runs*
+  `PlayerMatchCount`, overwriting its CSV; add `--no-launch-profile` to see
+  the usage instead.
+
+Without `[dir]`, the three header analyses scan Hal's match database
+(`Reports.XgDir`) and `DuplicateProblems` a BatchAnalyze positions folder
+(`Reports.PositionsDir`). An unknown or missing name prints usage and exits 2;
+an absent input directory says so and exits 1. The reports used to be xUnit
+facts, so every test run ran three or four full analyses on Hal's machine —
+most of the suite's time — and overwrote their CSVs
+(halheinrich/backgammon#438). A command keeps the test run to tests, and the
+entry point lives inside this assembly so it reaches the `internal` `Analyses`
+without widening anything. `ReportCommand.Run` takes the directory check and
+the run as arguments, which is what lets `ReportCommandTests` pin the dispatch
+without running an analysis.
 
 **Analysis method shape — compute / persist split.** Each analysis is two
 methods on `Analyses`. `Compute*(string xgDir, Action<string> log)` does the
@@ -111,11 +138,11 @@ collection nor writable through a cast.
 
 ## Public API
 
-**There is no public API.** This is a personal analysis tool driven by its own
-test project, not a library: nothing in this assembly is `public`. There is no
-exe either — the `[Fact]` methods in `XgAnalytics.Tests` are the runner (see
-Architecture), so the test assembly is the *only* caller, and it reaches
-everything below through the `InternalsVisibleTo` in `XgAnalytics.csproj`.
+**There is no public API.** This is a personal analysis tool run as its own
+command, not a library: nothing in this assembly is `public`. Its callers are
+its own entry point (`Program` → `ReportCommand`, see Architecture) and the
+test assembly, which reaches everything below through the
+`InternalsVisibleTo` in `XgAnalytics.csproj`.
 
 The internal testable seams are documented here because they are what a
 maintainer tests and modifies against — not because anything outside may call
@@ -161,7 +188,7 @@ output is the `log` stream plus the CSV file.
 ## Pitfalls
 
 - **Hard-coded CSV output paths** under `D:\Users\Hal\Documents\Excel\Backgammon\`, baked into the `void` wrappers. The directory must already exist — no `Directory.CreateDirectory` call. The wrappers won't run on a non-Hal machine; the `Compute*` aggregators carry no such dependency.
-- **Two test layers, both green-on-any-machine.** The `[Fact]`s named after the analyses are the *ad-hoc runner* — they point at Hal's local input folders and write CSVs, and self-skip (early return) when either the input dir or the CSV output dir is absent. Note the runners do not all share one input: the three header analyses scan `...\hhDb\Xg`, while `DuplicateProblems` scans a BatchAnalyze `Positions\` folder, the folder-cleanup case it exists for. The deterministic CI coverage is separate: corpus shape-invariant tests over the shared `TestData/xg` (guarded for an empty/absent corpus) plus pinned-fixture discrimination tests over `TestData/FixtureFiles` (the 23-point match, and `MoneyTest.xg` for money read by kind). Never make the corpus tests pin a filename or count — that corpus churns (see `../AGENTS.md` TestData convention).
+- **Two test layers, both green-on-any-machine; neither runs a report.** Running a report is the command's job (see Architecture), and the reports do not all share one input: the three header analyses scan `...\hhDb\Xg`, while `DuplicateProblems` scans a BatchAnalyze `Positions\` folder, the folder-cleanup case it exists for. The tests are corpus shape-invariant tests over the shared `TestData/xg` (guarded for an empty/absent corpus) plus pinned-fixture discrimination tests over `TestData/FixtureFiles` (the 23-point match, and `MoneyTest.xg` for money read by kind); they call the `Compute*` aggregators and write no CSV. Never make the corpus tests pin a filename or count — that corpus churns (see `../AGENTS.md` TestData convention).
 - **Silent parse-failure swallow.** `catch { continue; }` hides corrupted-file exceptions entirely — neither logged nor counted. A batch can appear to "complete" while skipping a meaningful fraction of input. `DuplicateProblems` is the exception: it still swallows the exception, but counts the file and logs the total.
 - **CSV overwrite with no guard.** Re-running an analysis clobbers its previous CSV without warning.
 - **Unfiltered iteration.** Despite the `XgFilter_Lib` project reference, no analysis filters — every `.xg`/`.xgp` in `xgDir` is processed.

@@ -1,0 +1,20 @@
+{
+  "profiles": {
+    "PlayerMatchCount": {
+      "commandName": "Project",
+      "commandLineArgs": "PlayerMatchCount"
+    },
+    "NonStandardStarts": {
+      "commandName": "Project",
+      "commandLineArgs": "NonStandardStarts"
+    },
+    "MatchScoreDistribution": {
+      "commandName": "Project",
+      "commandLineArgs": "MatchScoreDistribution"
+    },
+    "DuplicateProblems": {
+      "commandName": "Project",
+      "commandLineArgs": "DuplicateProblems"
+    }
+  }
+}

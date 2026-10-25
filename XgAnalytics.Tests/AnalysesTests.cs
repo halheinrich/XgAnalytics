@@ -9,57 +9,6 @@ namespace XgAnalytics.Tests;
 public class AnalysesTests(ITestOutputHelper output)
 {
     // -------------------------------------------------------------------------
-    //  Ad-hoc analysis-runner facts (manual driver, not CI checks)
-    //
-    //  These point at Hal's local match database and clobber CSVs under a
-    //  hard-coded output directory. They are the user's ad-hoc way of *running*
-    //  an analysis from Test Explorer — kept, not deleted. Both the input and
-    //  the output directories are guarded so the facts self-skip (green) on any
-    //  machine that lacks them, rather than failing.
-    // -------------------------------------------------------------------------
-
-    private const string XgDir = @"D:\Users\Hal\Documents\eXtremeGammon\BatchAnalyze\Matches\hhDb\Xg";
-    private const string CsvOutputDir = @"D:\Users\Hal\Documents\Excel\Backgammon";
-
-    // DuplicateProblems' natural input is a BatchAnalyze *Positions* folder
-    // rather than the match database above — that is the folder-cleanup use
-    // case it exists for (halheinrich/backgammon#117). A knob: repoint it at
-    // whichever folder is being cleaned. Absent folder => the fact self-skips.
-    private const string PositionsDir =
-        @"D:\Users\Hal\Documents\eXtremeGammon\BatchAnalyze\Positions\Move2\3a3a";
-
-    private static bool AdHocDirsPresent =>
-        Directory.Exists(XgDir) && Directory.Exists(CsvOutputDir);
-
-    [Fact]
-    public void PlayerMatchCount()
-    {
-        if (!AdHocDirsPresent) return;
-        Analyses.PlayerMatchCount(XgDir, output.WriteLine);
-    }
-
-    [Fact]
-    public void NonStandardStarts()
-    {
-        if (!AdHocDirsPresent) return;
-        Analyses.NonStandardStarts(XgDir, output.WriteLine);
-    }
-
-    [Fact]
-    public void MatchScoreDistribution()
-    {
-        if (!AdHocDirsPresent) return;
-        Analyses.MatchScoreDistribution(XgDir, output.WriteLine);
-    }
-
-    [Fact]
-    public void DuplicateProblems()
-    {
-        if (!Directory.Exists(PositionsDir) || !Directory.Exists(CsvOutputDir)) return;
-        Analyses.DuplicateProblems(PositionsDir, output.WriteLine);
-    }
-
-    // -------------------------------------------------------------------------
     //  Layer 1 — fixture-agnostic shape invariants over TestData/xg
     //
     //  Exercise the pure aggregators over whatever corpus exists and assert only

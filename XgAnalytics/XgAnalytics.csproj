@@ -1,6 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- A command entry point that runs one report (Program.cs); the tests
+         still reach Analyses through InternalsVisibleTo below. -->
+    <OutputType>Exe</OutputType>
     <LangVersion>14.0</LangVersion>
     <RootNamespace>XgAnalytics</RootNamespace>
     <AssemblyName>XgAnalytics</AssemblyName>
