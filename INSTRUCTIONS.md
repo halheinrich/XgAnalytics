@@ -52,23 +52,23 @@ and their tests (see Architecture).
 `MatchScoreDistribution` or `DuplicateProblems`, the `void` wrappers' names —
 over an optional input directory, logging progress to the console:
 
-- **Visual Studio:** set `XgAnalytics` as the startup project, pick the report
-  in the toolbar's start-profile dropdown (`Properties/launchSettings.json`),
-  and press Ctrl+F5. Use the Release configuration for a full-corpus run. The
-  first profile, `Usage`, passes no arguments, so a start with no report
-  picked prints the list of reports and runs nothing; one profile per report
-  follows it. `LaunchProfilesTests` reads that file (copied to the test
+- **Visual Studio:** the steps, including scanning another folder, live in
+  the comment at the top of `XgAnalytics/Program.cs`; in short, pick the
+  report in the start-profile dropdown (`Properties/launchSettings.json`)
+  and press Ctrl+F5. The first profile, `Usage`, passes no arguments, so a
+  start with no report picked prints the list of reports and runs nothing;
+  one profile per report follows it. `LaunchProfilesTests` reads that file (copied to the test
   output) and fails when the profiles and `Reports.All` disagree: `Usage`
   must be first, with no arguments, and each report keeps exactly one
   profile under its name, whose first argument is that report. Any profile
   may add a folder after the report name, and a report may have extra
   profiles under any name; only each profile's first argument is checked,
   and it must name a report.
-- **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`.
-  The arguments after `--` replace the launch profile's; a bare `dotnet run`
-  with none falls back to the first profile, `Usage`. Pass
-  `--no-launch-profile` anyway when only the usage is wanted: it does not
-  depend on the profiles' order.
+- **Command line:** `dotnet run --project XgAnalytics -c Release -- <analysis> [dir]`;
+  the examples are in `Program.cs` too. The arguments after `--` replace the
+  launch profile's; a bare `dotnet run` with none falls back to the first
+  profile, `Usage`. Pass `--no-launch-profile` anyway when only the usage is
+  wanted: it does not depend on the profiles' order.
 
 Without `[dir]`, the three header analyses scan Hal's match database
 (`Reports.XgDir`) and `DuplicateProblems` a BatchAnalyze positions folder
