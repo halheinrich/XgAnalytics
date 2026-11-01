@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace XgAnalytics;
 
 /// <summary>
-/// The one way this library's result records take in a collection: an
+/// The one way this assembly's result records take in a collection: an
 /// immutable copy, made where the record is built. The record then hands out
 /// nothing its caller can change afterwards, and nothing a cast can write — an
 /// <see cref="ImmutableArray{T}"/> seen as an <see cref="IReadOnlyList{T}"/>,

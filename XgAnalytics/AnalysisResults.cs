@@ -17,8 +17,8 @@ namespace XgAnalytics;
 //  out can change a record afterwards.
 //
 //  All `internal`, matching `Analyses` — they are its return types, and this
-//  library has no consumer outside its own test project (which sees them via
-//  the `InternalsVisibleTo` in XgAnalytics.csproj).
+//  assembly has no consumer outside its own entry point and test project
+//  (which sees them via the `InternalsVisibleTo` in XgAnalytics.csproj).
 // -----------------------------------------------------------------------------
 
 /// <summary>
